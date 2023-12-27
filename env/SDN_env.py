@@ -5,71 +5,84 @@ import json
 
 ACTION_TO_CLOUD = 0
 
-RAYLEIGH_VAR = 1
-RAYLEIGH_PATH_LOSS_A = 35
-RAYLEIGH_PATH_LOSS_B = 133.6
-RAYLEIGH_ANTENNA_GAIN = 0
-RAYLEIGH_SHADOW_FADING = 8
-RAYLEIGH_NOISE_dBm = -174
-
 ZERO_RES = 1e-6
 MAX_EDGE_NUM = 10
         
-class MEC_Env():
-    def __init__(self, conf_file='config1.json', conf_name='MEC_Config1', w=1.0, fc=None, fe=None, edge_num=None):
-        #读配置文件
+class SDN_Env():
+    def __init__(self, conf_file='config1.json', conf_name='SDN_Config1', w=1.0, fc=None, fe=None, edge_num=None):
+        # Read configuration file
         config = json.load(open(conf_file, 'r'))
         param = config[conf_name]
+
+        # Environment parameters
         self.dt = param['dt']
         self.Tmax = param['Tmax']
         self.edge_num_L = param['edge_num_L']
         self.edge_num_H = param['edge_num_H']
+        self.cloud_num_L = param.get('cloud_num_L', 1)  # Đọc giá trị cloud_num_L từ tệp cấu hình, mặc định là 1 nếu không có
+        self.cloud_num_H = param.get('cloud_num_H', 3)  # Đọc giá trị cloud_num_H từ tệp cấu hình, mặc định là 3 nếu không có
+
         self.user_num = param['user_num']
         self.possion_lamda = param['possion_lamda']
         
+        # Task parameters
         self.task_size_L = param['task_size_L']
         self.task_size_H = param['task_size_H']
         self.wave_cycle = param['wave_cycle']
         self.wave_peak = param['wave_peak']
         
+        # Cloud and Edge computing frequencies
         self.cloud_freq = param['cloud_cpu_freq']
         self.edge_freq = param['edge_cpu_freq']
         self.cloud_cpu_freq_peak = param['cloud_cpu_freq_peak']
         self.edge_cpu_freq_peak = param['edge_cpu_freq_peak']
         
+        # User-specified frequencies (optional)
         self.fc = fc
         self.fe = fe
         self.edge_n = edge_num
             
-        
+        # Computing resource capacities
         self.cloud_C = param['cloud_C']
         self.edge_C = param['edge_C']
         self.cloud_k = param['cloud_k']
         self.edge_k = param['edge_k']
-        self.cloud_off_power = param['cloud_off_power']
-        self.edge_off_power = param['edge_off_power']
         
+        # User distribution parameters
         self.cloud_user_dist_H = param['cloud_user_dist_H']
         self.cloud_user_dist_L = param['cloud_user_dist_L']
         self.edge_user_dist_H = param['edge_user_dist_H']
         self.edge_user_dist_L = param['edge_user_dist_L']
+
+        # Data rate parameters
+        self.cloud_off_datarate = param['cloud_off_datarate']
+        self.edge_off_datarate = param['edge_off_datarate']
         
-        self.cloud_off_band_width = param['cloud_off_band_width']
-        self.edge_off_band_width = param['edge_off_band_width']
-        self.noise_dBm = param['noise_dBm']
+
+        self.edge_band_width = param['edge_band_width']  
+        self.cloud_off_band_width = param['cloud_off_band_width'] 
+
+        # Bandwidth capacity between user and edge server
+        self.LC = np.random.uniform(param['min_bandwidth_capacity'], param['max_bandwidth_capacity'], size=(self.user_num, self.edge_num))
+
+        # Reward parameter
         self.reward_alpha = param['reward_alpha']
+        
+        # Weight parameter
         self.w = w
         
-        self.reset()
-        
+        # Initialize the environment
+        self.reset()  
+
     
     def reset(self):
+        # Reset environment variables
         self.step_cnt = 0
         self.task_size = 0
         self.task_user_id = 0
         self.step_cloud_dtime = 0
         self.step_edge_dtime = 0
-        self.step_energy = 0
+        self.step_link_utilisation = 0
         self.rew_t = 0
         self.rew_e = 0
         self.arrive_flag = False
@@ -80,118 +93,142 @@ class MEC_Env():
         self.edge_exe_lists = []
         self.unassigned_task_list = []
         self.action = ACTION_TO_CLOUD
-        
-        self.edge_num = np.random.randint(self.edge_num_L, self.edge_num_H+1)
+
+        # Randomly determine the number of edge servers
+        self.edge_num = np.random.randint(self.edge_num_L, self.edge_num_H + 1)
         if self.edge_n:
             self.edge_num = self.edge_n
-        self.action_space = self.edge_num + 1
-        self.finish_time = np.array([0]*(self.edge_num+1))
-        
-        self.cloud_cpu_freq = np.random.uniform(self.cloud_freq-self.cloud_cpu_freq_peak, self.cloud_freq+self.cloud_cpu_freq_peak)
+        # Randomly determine the number of cloud servers
+        self.cloud_num = np.random.randint(self.cloud_num_L, self.cloud_num_H + 1)
+        if self.cloud_n:
+            self.cloud_num = self.cloud_n
+        # Set the action space size based on the number of edge servers
+        self.action_space = self.edge_num + self.cloud_num
+
+        # Initialize finish time array for cloud and edge servers
+        self.finish_time = np.array([0] * (self.edge_num + self.cloud_num))
+
+        # Randomly determine cloud CPU frequency and edge CPU frequencies
+        self.cloud_cpu_freqs = np.random.uniform(self.cloud_freq - self.cloud_cpu_freq_peak, self.cloud_freq + self.cloud_cpu_freq_peak, size=self.cloud_num)
         self.cloud_cpu_freq = self.fc if self.fc else self.cloud_cpu_freq
-        self.edge_cpu_freq = [0]*self.edge_num
-        self.task_size_exp_theta = self.cloud_cpu_freq/self.cloud_C
+        self.edge_cpu_freq = [0] * self.edge_num
+
+        # Bandwidth capacity between user and edge server
+        self.LC = np.random.uniform(param['min_bandwidth_capacity'], param['max_bandwidth_capacity'], size=(self.user_num, self.edge_num))
+
+        # Calculate task size exponential theta based on CPU frequencies and capacities
+        self.task_size_exp_theta = self.cloud_cpu_freq / self.cloud_C
         for i in range(self.edge_num):
-            self.edge_cpu_freq[i] = np.random.uniform(self.edge_freq-self.edge_cpu_freq_peak, self.edge_freq+self.edge_cpu_freq_peak)
+            self.edge_cpu_freq[i] = np.random.uniform(self.edge_freq - self.edge_cpu_freq_peak, self.edge_freq + self.edge_cpu_freq_peak)
             self.edge_cpu_freq[i] = self.fe if self.fe else self.edge_cpu_freq[i]
             self.edge_off_lists.append([])
             self.edge_exe_lists.append([])
-            self.task_size_exp_theta += self.edge_cpu_freq[i]/self.edge_C
-        
+            self.task_size_exp_theta += self.edge_cpu_freq[i] / self.edge_C
+
+        # Set environment flags and variables
         self.done = False
         self.reward_buff = []
+
+        # Generate random user distances for cloud and edge servers
         self.cloud_dist = np.random.uniform(self.cloud_user_dist_L, self.cloud_user_dist_H, size=(1, self.user_num))
         self.user_dist = self.cloud_dist
         for i in range(self.edge_num):
             edge_dist = np.random.uniform(self.edge_user_dist_L, self.edge_user_dist_H, size=(1, self.user_num))
             self.user_dist = np.concatenate((self.user_dist, edge_dist), axis=0)
-            
-        
-        self.cloud_off_datarate, self.edge_off_datarate = self.updata_off_datarate()
+
+        # Generate tasks for the environment
         self.generate_task()
+
+        # Return the initial observation
         return self.get_obs()
-        
-        
+
+               
     def step(self, actions):
-        assert self.done==False, 'enviroment already output done'
-        self.step_cnt += 1
-        self.step_cloud_dtime = 0
-        self.step_edge_dtime = 0
-        self.step_energy = 0
-        finished_task = []
-        
+        # Kiểm tra xem môi trường đã kết thúc chưa
+        assert self.done == False, 'environment already output done'
+        self.step_cnt += 1  # Tăng bước thời gian lên 1
+        self.step_cloud_dtime = 0  # Đặt lại thời gian đám mây
+        self.step_edge_dtime = 0  # Đặt lại thời gian nút edge
+        self.step_link_utilisation = 0  # Đặt lại khả năng sử dụng liên kết 
+        finished_task = []  # Danh sách công việc đã hoàn thành
+
         #####################################################
-        #分配任务
+        # Assignment of tasks (Phân công công việc)
         if self.arrive_flag:
-            assert actions <= self.edge_num and actions >= ACTION_TO_CLOUD ,'action not in the interval %d, %d'%(actions,self.edge_num)
+            assert actions <= self.edge_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d' % (
+            actions, self.edge_num)
             self.action = actions
             self.arrive_flag = False
             the_task = {}
-            the_task['start_step'] =  self.step_cnt
+            the_task['start_step'] = self.step_cnt
             the_task['user_id'] = self.task_user_id
             the_task['size'] = self.task_size
             the_task['remain'] = self.task_size
             the_task['off_time'] = 0
             the_task['wait_time'] = 0
             the_task['exe_time'] = 0
-            the_task['off_energy'] = 0
-            the_task['exe_energy'] = 0
-            
-            if actions == ACTION_TO_CLOUD:
-                the_task['to'] = 0
-                the_task['off_energy'] = (the_task['size']/self.cloud_off_datarate[the_task['user_id']])*self.cloud_off_power
-                the_task['exe_energy'] = the_task['size']*self.cloud_k*self.cloud_C*(self.cloud_cpu_freq**2)
-                self.step_energy = the_task['off_energy'] + the_task['exe_energy']
-                self.cloud_off_list.append(the_task)
-            else:
-                e = actions
-                the_task['to'] = e
-                the_task['off_energy'] = (the_task['size']/self.edge_off_datarate[e-1, the_task['user_id']])*self.edge_off_power
-                the_task['exe_energy'] = the_task['size']*self.edge_k*self.edge_C*(self.edge_cpu_freq[e-1]**2)
-                self.step_energy = the_task['off_energy'] + the_task['exe_energy']
-                self.edge_off_lists[e-1].append(the_task)
-        self.rew_t, self.rew_e = self.estimate_rew()
-                
+            the_task['off_link_utilisation'] = 0  # Initialize offloading link utilization
+            the_task['exe_link_utilisation'] = 0  # Initialize execution link utilization
+
+        if actions == ACTION_TO_CLOUD:
+            the_task['to'] = 0
+            # Calculate offloading link utilization based on the provided formula
+            off_link_utilisation = np.sum([self.cloud_off_lists[m]['size'] for m in range(len(self.cloud_off_list))]) / (
+                    self.cloud_off_band_width * self.dt)
+            the_task['off_link_utilisation'].append(off_link_utilisation)
+            self.cloud_off_list.append(the_task)
+        else:
+            e = actions
+            the_task['to'] = e
+            # Calculate offloading link utilization based on the provided formula
+            off_link_utilisation = np.sum([self.edge_off_lists[m][e - 1]['size'] for m in range(len(self.edge_off_lists[e - 1]))]) / (
+                    self.edge_off_band_width[e - 1] * self.dt)
+            the_task['off_link_utilisation'].append(off_link_utilisation)
+            self.edge_off_lists[e - 1].append(the_task)
+
+        self.rew_t, self.rew_lu = self.estimate_rew()
+
         #####################################################
-        #产生到达任务
+        # Generate arriving tasks (Tạo công việc mới)
         self.generate_task()
         #####################################################
-        #云网络
-        #推进任务卸载与执行进度
+        # Cloud network (Mạng đám mây)
+        # Advance the progress of task offloading and execution (Tiến triển tiến độ giải nhiệm công việc và thực hiện)
         used_time = 0
-        while(used_time<self.dt):
+        while (used_time < self.dt):
             off_estimate_time = []
             exe_estimate_time = []
             task_off_num = len(self.cloud_off_list)
             task_exe_num = len(self.cloud_exe_list)
-            #估计卸载时间
+            # Estimate offloading time (Ước lượng thời gian giải nhiệm)
             for i in range(task_off_num):
                 the_user = self.cloud_off_list[i]['user_id']
-                estimate_time = self.cloud_off_list[i]['remain']/self.cloud_off_datarate[the_user]
+                estimate_time = self.cloud_off_list[i]['remain'] / self.cloud_off_datarate[the_user]
                 off_estimate_time.append(estimate_time)
-            #估计执行时间
+            # Estimate execution time (Ước lượng thời gian thực hiện)
             if task_exe_num > 0:
-                cloud_exe_rate = self.cloud_cpu_freq/(self.cloud_C*task_exe_num)
+                cloud_exe_rate = self.cloud_cpu_freq / (self.cloud_C * task_exe_num)
             for i in range(task_exe_num):
-                estimate_time = self.cloud_exe_list[i]['remain']/cloud_exe_rate
+                estimate_time = self.cloud_exe_list[i]['remain'] / cloud_exe_rate
                 exe_estimate_time.append(estimate_time)
-            #运行（最短时间）
-            if len(off_estimate_time)+len(exe_estimate_time) > 0:
+            # Run (in the shortest time) (Chạy - thời gian ngắn nhất)
+            if len(off_estimate_time) + len(exe_estimate_time) > 0:
                 min_time = min(off_estimate_time + exe_estimate_time)
             else:
                 min_time = self.dt
-   
-            run_time = min(self.dt-used_time, min_time)
 
-            #推进卸载
+            run_time = min(self.dt - used_time, min_time)
+
+            # Advance offloading (Tiến triển giải nhiệm)
             cloud_pre_exe_list = []
             retain_flag_off = np.ones(task_off_num, dtype=np.bool)
             for i in range(task_off_num):
                 the_user = self.cloud_off_list[i]['user_id']
-                self.cloud_off_list[i]['remain'] -= self.cloud_off_datarate[the_user]*run_time
-                self.cloud_off_list[i]['off_energy'] += run_time*self.cloud_off_power
-                # self.step_energy += run_time*self.cloud_off_power
-                self.cloud_off_list[i]['off_time'] += run_time
+                self.cloud_off_list[i]['remain'] -= self.cloud_off_datarate[the_user] * run_time
+                self.cloud_off_list[i]['off_link_utilisation'] += (
+                    np.sum([task['size'] for task in self.cloud_off_list]) *
+                    self.cloud_off_list[i]['size']
+                ) / (self.LC[the_user] * self.dt)
                 if self.cloud_off_list[i]['remain'] <= ZERO_RES:
                     retain_flag_off[i] = False
                     the_task = deepcopy(self.cloud_off_list[i])
@@ -199,65 +236,69 @@ class MEC_Env():
                     cloud_pre_exe_list.append(the_task)
             pt = 0
             for i in range(task_off_num):
-                if retain_flag_off[i]==False:
+                if retain_flag_off[i] == False:
                     self.cloud_off_list.pop(pt)
                 else:
                     pt += 1
-            #推进执行
+            # Advance execution (Tiến triển thực hiện)
             if task_exe_num > 0:
-                cloud_exe_size = self.cloud_cpu_freq*run_time/(self.cloud_C*task_exe_num)
-                cloud_exe_energy = self.cloud_k*run_time*(self.cloud_cpu_freq**3)/task_exe_num
+                cloud_exe_size = self.cloud_cpu_freq * run_time / (self.cloud_C * task_exe_num)
+                cloud_exe_link_utilisation = (
+                    np.sum([task['size'] for task in self.cloud_exe_list]) *
+                    cloud_exe_size
+                ) / (self.LC[0] * self.dt)
             retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
             for i in range(task_exe_num):
                 self.cloud_exe_list[i]['remain'] -= cloud_exe_size
-                self.cloud_exe_list[i]['exe_energy'] += cloud_exe_energy
+                self.cloud_exe_list[i]['exe_link_utilisation'] += cloud_exe_link_utilisation
                 self.cloud_exe_list[i]['exe_time'] += run_time
                 if self.cloud_exe_list[i]['remain'] <= ZERO_RES:
                     retain_flag_exe[i] = False
             pt = 0
             for i in range(task_exe_num):
-                if retain_flag_exe[i]==False:
+                if retain_flag_exe[i] == False:
                     self.cloud_exe_list.pop(pt)
                 else:
                     pt += 1
             self.cloud_exe_list = self.cloud_exe_list + cloud_pre_exe_list
             used_time += run_time
         #####################################################
-        #边缘网络
+        # Edge network (Mạng nút edge)
         for n in range(self.edge_num):
-            #推进任务卸载与执行进度
+            # Advance the progress of task offloading and execution (Tiến triển tiến độ giải nhiệm công việc và thực hiện)
             used_time = 0
-            while(used_time<self.dt):
+            while (used_time < self.dt):
                 off_estimate_time = []
                 exe_estimate_time = []
                 task_off_num = len(self.edge_off_lists[n])
                 task_exe_num = len(self.edge_exe_lists[n])
-                #估计卸载时间
+                # Estimate offloading time (Ước lượng thời gian giải nhiệm)
                 for i in range(task_off_num):
                     the_user = self.edge_off_lists[n][i]['user_id']
-                    estimate_time = self.edge_off_lists[n][i]['remain']/self.edge_off_datarate[n,the_user]
+                    estimate_time = self.edge_off_lists[n][i]['remain'] / self.edge_off_datarate[n, the_user]
                     off_estimate_time.append(estimate_time)
-                #估计执行时间
+                # Estimate execution time (Ước lượng thời gian thực hiện)
                 if task_exe_num > 0:
-                    edge_exe_rate = self.edge_cpu_freq[n]/(self.edge_C*task_exe_num)
+                    edge_exe_rate = self.edge_cpu_freq[n] / (self.edge_C * task_exe_num)
                 for i in range(task_exe_num):
-                    estimate_time = self.edge_exe_lists[n][i]['remain']/edge_exe_rate
+                    estimate_time = self.edge_exe_lists[n][i]['remain'] / edge_exe_rate
                     exe_estimate_time.append(estimate_time)
-                #运行（最短时间）
-                if len(off_estimate_time)+len(exe_estimate_time) > 0:
+                # Run (in the shortest time) (Chạy - thời gian ngắn nhất)
+                if len(off_estimate_time) + len(exe_estimate_time) > 0:
                     min_time = min(off_estimate_time + exe_estimate_time)
                 else:
                     min_time = self.dt
 
-                run_time = min(self.dt-used_time, min_time)
+                run_time = min(self.dt - used_time, min_time)
 
-                #推进卸载
+                # Advance offloading (Tiến triển giải nhiệm)
                 edge_pre_exe_list = []
                 retain_flag_off = np.ones(task_off_num, dtype=np.bool)
                 for i in range(task_off_num):
                     the_user = self.edge_off_lists[n][i]['user_id']
-                    self.edge_off_lists[n][i]['remain'] -= self.edge_off_datarate[n,the_user]*run_time
-                    self.edge_off_lists[n][i]['off_energy'] += run_time*self.edge_off_power
+                    self.edge_off_lists[n][i]['remain'] -= self.edge_off_datarate[n, the_user] * run_time
+                    self.edge_off_lists[n][i]['off_link_utilisation'] += (self.edge_off_datarate[n, the_user] * run_time) / (
+            self.edge_band_width * task_off_num)
                     self.edge_off_lists[n][i]['off_time'] += run_time
                     if self.edge_off_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_off[i] = False
@@ -266,24 +307,27 @@ class MEC_Env():
                         edge_pre_exe_list.append(the_task)
                 pt = 0
                 for i in range(task_off_num):
-                    if retain_flag_off[i]==False:
+                    if retain_flag_off[i] == False:
                         self.edge_off_lists[n].pop(pt)
                     else:
                         pt += 1
-                #推进执行
+                # Advance execution (Tiến triển thực hiện)
                 if task_exe_num > 0:
-                    edge_exe_size = self.edge_cpu_freq[n]*run_time/(self.edge_C*task_exe_num)
-                    edge_exe_energy = self.edge_k*run_time*(self.edge_cpu_freq[n]**3)/task_exe_num
+                    edge_exe_size = self.edge_cpu_freq[n] * run_time / (self.edge_C * task_exe_num)
+                    # Calculate exe_link_utilisation using the provided formula
+                    edge_exe_link_utilisation = (edge_exe_size * self.edge_exe_list[n]['exe_link_utilisation']) / (
+                        self.LC[n] * self.dt
+                    )
                 retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
                 for i in range(task_exe_num):
                     self.edge_exe_lists[n][i]['remain'] -= edge_exe_size
-                    self.edge_exe_lists[n][i]['exe_energy'] += edge_exe_energy
+                    self.edge_exe_list[i]['exe_link_utilisation'] += edge_exe_link_utilisation                    
                     self.edge_exe_lists[n][i]['exe_time'] += run_time
                     if self.edge_exe_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
                 pt = 0
                 for i in range(task_exe_num):
-                    if retain_flag_exe[i]==False:
+                    if retain_flag_exe[i] == False:
                         self.edge_exe_lists[n].pop(pt)
                     else:
                         pt += 1
@@ -291,63 +335,53 @@ class MEC_Env():
                 used_time += run_time
 
         #####################################################
-        #done判定
+        # Done condition (Điều kiện kết thúc)
         if (self.step_cnt >= self.Tmax):
             self.done = True
         done = self.done
-        
+
         #####################################################
-        #obs编码
+        # Observation encoding (Mã hóa quan sát)
         obs = self.get_obs()
-        
+
         #####################################################
-        #reward计算
+        # Reward calculation (Tính toán thưởng)
         reward = self.get_reward(finished_task)
-        
+
         #####################################################
-        #备注信息
+        # Additional information (Thông tin bổ sung)
         info = {}
-        return obs, reward, done ,info
+        return obs, reward, done, info
     
     def generate_task(self):
-        #####################################################
-        #产生到达任务
-        task_num = np.random.poisson(self.possion_lamda)
+    #####################################################
+    # Generate arriving tasks
+        task_num = np.random.poisson(self.possion_lamda)  # Generate a random number of tasks based on a Poisson distribution
         for i in range(task_num):
             task = {}
             theta = self.task_size_exp_theta + self.wave_peak*np.sin(self.step_cnt*2*np.pi/self.wave_cycle)
+            # Calculate the task size based on an exponential distribution with a dynamic parameter
             task_size = np.random.exponential(theta)
+            # Clip the task size to be within specified bounds
             task['task_size'] = np.clip(task_size, self.task_size_L, self.task_size_H)
+            # Assign a random user ID to the task
             task['task_user_id'] = np.random.randint(0, self.user_num)
+            # Add the newly generated task to the list of unassigned tasks
             self.unassigned_task_list.append(task)
-            
+        
         if self.step_cnt < self.Tmax:
             if len(self.unassigned_task_list) > 0:
+                # If there are unassigned tasks, set the arrive_flag to True and pick the first task from the list
                 self.arrive_flag = True
                 arrive_task = self.unassigned_task_list.pop(0)
                 self.task_size = arrive_task['task_size']
                 self.task_user_id = arrive_task['task_user_id']
             else:
+                # If there are no unassigned tasks, set arrive_flag to True with a task size of 0 and a random user ID
                 self.arrive_flag = True
                 self.task_size = 0
                 self.task_user_id = np.random.randint(0, self.user_num)
-            
-            
-    def updata_off_datarate(self):
-        rayleigh = RAYLEIGH_VAR/2*(np.random.randn(self.edge_num+1, self.user_num)**2 + np.random.randn(self.edge_num+1, self.user_num)**2)  
-        path_loss_dB = RAYLEIGH_PATH_LOSS_A*np.log10(self.user_dist/1000) + RAYLEIGH_PATH_LOSS_B
-        total_path_loss_IndB = RAYLEIGH_ANTENNA_GAIN - RAYLEIGH_SHADOW_FADING - path_loss_dB
-        path_loss = 10**(total_path_loss_IndB/10)
-        rayleigh_noise_cloud = 10**((RAYLEIGH_NOISE_dBm-30)/10)*self.cloud_off_band_width;
-        rayleigh_noise_edge = 10**((RAYLEIGH_NOISE_dBm-30)/10)*self.edge_off_band_width;
-        gain_ = (path_loss*rayleigh)
-        cloud_gain = gain_[0,:]/rayleigh_noise_cloud
-        edge_gain = gain_[1:,:]/rayleigh_noise_edge
-        cloud_noise = 10**((self.noise_dBm-30)/10)*self.cloud_off_band_width;
-        edge_noise = 10**((self.noise_dBm-30)/10)*self.edge_off_band_width;
-        cloud_off_datarate = self.cloud_off_band_width*np.log2(1 + (self.cloud_off_power*(cloud_gain**2))/cloud_noise)  
-        edge_off_datarate = self.edge_off_band_width*np.log2(1 + (self.edge_off_power*(edge_gain**2))/edge_noise)  
-        return cloud_off_datarate, edge_off_datarate
+
 
     
     def get_obs(self):
@@ -455,17 +489,16 @@ class MEC_Env():
         reward_dt = t1 - t2
         if self.task_size > 0:
             reward_dt = -reward_dt*0.01
-            reward_de = -self.step_energy*50
+            reward_dlu = -self.step_link_utilisation*50
         else:
             reward_dt = 0
-            reward_de = 0
+            reward_dlu = 0
         
-        return reward_dt, reward_de
+        return reward_dt, reward_dlu
     
     def get_reward(self, finished_task):
-
-        reward = self.w*self.rew_t + (1.0-self.w)*self.rew_e
-        
+        reward_dt, reward_dlu = self.estimate_rew()
+        reward = self.w * reward_dt + (1.0 - self.w) * reward_dlu
         return reward
 
     
