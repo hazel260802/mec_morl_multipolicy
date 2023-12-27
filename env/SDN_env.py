@@ -117,13 +117,21 @@ class SDN_Env():
         self.LC = np.random.uniform(param['min_bandwidth_capacity'], param['max_bandwidth_capacity'], size=(self.user_num, self.edge_num))
 
         # Calculate task size exponential theta based on CPU frequencies and capacities
-        self.task_size_exp_theta = self.cloud_cpu_freq / self.cloud_C
+        self.task_size_exp_theta = 0  # Reset the value
         for i in range(self.edge_num):
             self.edge_cpu_freq[i] = np.random.uniform(self.edge_freq - self.edge_cpu_freq_peak, self.edge_freq + self.edge_cpu_freq_peak)
             self.edge_cpu_freq[i] = self.fe if self.fe else self.edge_cpu_freq[i]
             self.edge_off_lists.append([])
             self.edge_exe_lists.append([])
             self.task_size_exp_theta += self.edge_cpu_freq[i] / self.edge_C
+
+        # Calculate task size exponential theta for cloud servers
+        for i in range(self.cloud_num):
+            self.cloud_cpu_freqs[i] = np.random.uniform(self.cloud_freq - self.cloud_cpu_freq_peak, self.cloud_freq + self.cloud_cpu_freq_peak)
+            self.cloud_cpu_freqs[i] = self.fc if self.fc else self.cloud_cpu_freqs[i]
+            self.cloud_off_lists.append([])
+            self.cloud_exe_lists.append([])
+            self.task_size_exp_theta += self.cloud_cpu_freqs[i] / self.cloud_C
 
         # Set environment flags and variables
         self.done = False
