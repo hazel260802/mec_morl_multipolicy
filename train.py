@@ -15,7 +15,7 @@ import time
 import json
 import math
 from tqdm import tqdm
-from env import MEC_Env
+from env import SDN_env
 from network import conv_mlp_net
 
 

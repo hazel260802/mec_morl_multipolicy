@@ -138,8 +138,9 @@ class SDN_Env():
         self.reward_buff = []
 
         # Generate random user distances for cloud and edge servers
-        self.cloud_dist = np.random.uniform(self.cloud_user_dist_L, self.cloud_user_dist_H, size=(1, self.user_num))
-        self.user_dist = self.cloud_dist
+        for i in range(self.cloud_num):
+            cloud_dist = np.random.uniform(self.cloud_user_dist_L, self.cloud_user_dist_H, size=(1, self.user_num))
+            self.user_dist = np.concatenate((self.user_dist, cloud_dist), axis=0)
         for i in range(self.edge_num):
             edge_dist = np.random.uniform(self.edge_user_dist_L, self.edge_user_dist_H, size=(1, self.user_num))
             self.user_dist = np.concatenate((self.user_dist, edge_dist), axis=0)
@@ -163,7 +164,7 @@ class SDN_Env():
         #####################################################
         # Assignment of tasks (Phân công công việc)
         if self.arrive_flag:
-            assert actions <= self.edge_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d' % (
+            assert actions <= self.edge_num and actions <= self.cloud_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d' % (
             actions, self.edge_num)
             self.action = actions
             self.arrive_flag = False
@@ -175,12 +176,12 @@ class SDN_Env():
             the_task['off_time'] = 0
             the_task['wait_time'] = 0
             the_task['exe_time'] = 0
-            the_task['off_link_utilisation'] = 0  # Initialize offloading link utilization
-            the_task['exe_link_utilisation'] = 0  # Initialize execution link utilization
+            the_task['off_link_utilisation'] = 0  
+            the_task['exe_link_utilisation'] = 0  
 
         if actions == ACTION_TO_CLOUD:
             the_task['to'] = 0
-            # Calculate offloading link utilization based on the provided formula
+            # Calculate non-offloading link utilization based on the provided formula
             off_link_utilisation = np.sum([self.cloud_off_lists[m]['size'] for m in range(len(self.cloud_off_list))]) / (
                     self.cloud_off_band_width * self.dt)
             the_task['off_link_utilisation'].append(off_link_utilisation)
@@ -202,74 +203,75 @@ class SDN_Env():
         #####################################################
         # Cloud network (Mạng đám mây)
         # Advance the progress of task offloading and execution (Tiến triển tiến độ giải nhiệm công việc và thực hiện)
-        used_time = 0
-        while (used_time < self.dt):
-            off_estimate_time = []
-            exe_estimate_time = []
-            task_off_num = len(self.cloud_off_list)
-            task_exe_num = len(self.cloud_exe_list)
-            # Estimate offloading time (Ước lượng thời gian giải nhiệm)
-            for i in range(task_off_num):
-                the_user = self.cloud_off_list[i]['user_id']
-                estimate_time = self.cloud_off_list[i]['remain'] / self.cloud_off_datarate[the_user]
-                off_estimate_time.append(estimate_time)
-            # Estimate execution time (Ước lượng thời gian thực hiện)
-            if task_exe_num > 0:
-                cloud_exe_rate = self.cloud_cpu_freq / (self.cloud_C * task_exe_num)
-            for i in range(task_exe_num):
-                estimate_time = self.cloud_exe_list[i]['remain'] / cloud_exe_rate
-                exe_estimate_time.append(estimate_time)
-            # Run (in the shortest time) (Chạy - thời gian ngắn nhất)
-            if len(off_estimate_time) + len(exe_estimate_time) > 0:
-                min_time = min(off_estimate_time + exe_estimate_time)
-            else:
-                min_time = self.dt
-
-            run_time = min(self.dt - used_time, min_time)
-
-            # Advance offloading (Tiến triển giải nhiệm)
-            cloud_pre_exe_list = []
-            retain_flag_off = np.ones(task_off_num, dtype=np.bool)
-            for i in range(task_off_num):
-                the_user = self.cloud_off_list[i]['user_id']
-                self.cloud_off_list[i]['remain'] -= self.cloud_off_datarate[the_user] * run_time
-                self.cloud_off_list[i]['off_link_utilisation'] += (
-                    np.sum([task['size'] for task in self.cloud_off_list]) *
-                    self.cloud_off_list[i]['size']
-                ) / (self.LC[the_user] * self.dt)
-                if self.cloud_off_list[i]['remain'] <= ZERO_RES:
-                    retain_flag_off[i] = False
-                    the_task = deepcopy(self.cloud_off_list[i])
-                    the_task['remain'] = self.cloud_off_list[i]['size']
-                    cloud_pre_exe_list.append(the_task)
-            pt = 0
-            for i in range(task_off_num):
-                if retain_flag_off[i] == False:
-                    self.cloud_off_list.pop(pt)
+        for n in range(self.cloud_num):
+            used_time = 0
+            while (used_time < self.dt):
+                off_estimate_time = []
+                exe_estimate_time = []
+                task_off_num = len(self.cloud_off_list)
+                task_exe_num = len(self.cloud_exe_list)
+                # Estimate offloading time (Ước lượng thời gian giải nhiệm)
+                for i in range(task_off_num):
+                    the_user = self.cloud_off_list[i]['user_id']
+                    estimate_time = self.cloud_off_list[i]['remain'] / self.cloud_off_datarate[the_user]
+                    off_estimate_time.append(estimate_time)
+                # Estimate execution time (Ước lượng thời gian thực hiện)
+                if task_exe_num > 0:
+                    cloud_exe_rate = self.cloud_cpu_freq / (self.cloud_C * task_exe_num)
+                for i in range(task_exe_num):
+                    estimate_time = self.cloud_exe_list[i]['remain'] / cloud_exe_rate
+                    exe_estimate_time.append(estimate_time)
+                # Run (in the shortest time) (Chạy - thời gian ngắn nhất)
+                if len(off_estimate_time) + len(exe_estimate_time) > 0:
+                    min_time = min(off_estimate_time + exe_estimate_time)
                 else:
-                    pt += 1
-            # Advance execution (Tiến triển thực hiện)
-            if task_exe_num > 0:
-                cloud_exe_size = self.cloud_cpu_freq * run_time / (self.cloud_C * task_exe_num)
-                cloud_exe_link_utilisation = (
-                    np.sum([task['size'] for task in self.cloud_exe_list]) *
-                    cloud_exe_size
-                ) / (self.LC[0] * self.dt)
-            retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
-            for i in range(task_exe_num):
-                self.cloud_exe_list[i]['remain'] -= cloud_exe_size
-                self.cloud_exe_list[i]['exe_link_utilisation'] += cloud_exe_link_utilisation
-                self.cloud_exe_list[i]['exe_time'] += run_time
-                if self.cloud_exe_list[i]['remain'] <= ZERO_RES:
-                    retain_flag_exe[i] = False
-            pt = 0
-            for i in range(task_exe_num):
-                if retain_flag_exe[i] == False:
-                    self.cloud_exe_list.pop(pt)
-                else:
-                    pt += 1
-            self.cloud_exe_list = self.cloud_exe_list + cloud_pre_exe_list
-            used_time += run_time
+                    min_time = self.dt
+
+                run_time = min(self.dt - used_time, min_time)
+
+                # Advance offloading (Tiến triển giải nhiệm)
+                cloud_pre_exe_list = []
+                retain_flag_off = np.ones(task_off_num, dtype=np.bool)
+                for i in range(task_off_num):
+                    the_user = self.cloud_off_list[i]['user_id']
+                    self.cloud_off_list[i]['remain'] -= self.cloud_off_datarate[the_user] * run_time
+                    self.cloud_off_list[i]['off_link_utilisation'] += (
+                        np.sum([task['size'] for task in self.cloud_off_list]) *
+                        self.cloud_off_list[i]['size']
+                    ) / (self.LC[the_user] * self.dt)
+                    if self.cloud_off_list[i]['remain'] <= ZERO_RES:
+                        retain_flag_off[i] = False
+                        the_task = deepcopy(self.cloud_off_list[i])
+                        the_task['remain'] = self.cloud_off_list[i]['size']
+                        cloud_pre_exe_list.append(the_task)
+                pt = 0
+                for i in range(task_off_num):
+                    if retain_flag_off[i] == False:
+                        self.cloud_off_list.pop(pt)
+                    else:
+                        pt += 1
+                # Advance execution (Tiến triển thực hiện)
+                if task_exe_num > 0:
+                    cloud_exe_size = self.cloud_cpu_freq * run_time / (self.cloud_C * task_exe_num)
+                    cloud_exe_link_utilisation = (
+                        np.sum([task['size'] for task in self.cloud_exe_list]) *
+                        cloud_exe_size
+                    ) / (self.LC[0] * self.dt)
+                retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
+                for i in range(task_exe_num):
+                    self.cloud_exe_list[i]['remain'] -= cloud_exe_size
+                    self.cloud_exe_list[i]['exe_link_utilisation'] += cloud_exe_link_utilisation
+                    self.cloud_exe_list[i]['exe_time'] += run_time
+                    if self.cloud_exe_list[i]['remain'] <= ZERO_RES:
+                        retain_flag_exe[i] = False
+                pt = 0
+                for i in range(task_exe_num):
+                    if retain_flag_exe[i] == False:
+                        self.cloud_exe_list.pop(pt)
+                    else:
+                        pt += 1
+                self.cloud_exe_list = self.cloud_exe_list + cloud_pre_exe_list
+                used_time += run_time
         #####################################################
         # Edge network (Mạng nút edge)
         for n in range(self.edge_num):
