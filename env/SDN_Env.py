@@ -9,7 +9,7 @@ ZERO_RES = 1e-6
 MAX_EDGE_NUM = 10
         
 class SDN_Env():
-    def __init__(self, conf_file='config1.json', conf_name='SDN_Config1', w=1.0, fc=None, fe=None, edge_num=None):
+    def __init__(self, conf_file='config1.json', conf_name='SDN_Config1', w=1.0, fc=None, fe=None, edge_num=None, cloud_num=None,):
         # Read configuration file
         config = json.load(open(conf_file, 'r'))
         param = config[conf_name]
@@ -36,11 +36,15 @@ class SDN_Env():
         self.edge_freq = param['edge_cpu_freq']
         self.cloud_cpu_freq_peak = param['cloud_cpu_freq_peak']
         self.edge_cpu_freq_peak = param['edge_cpu_freq_peak']
+
+        self.min_bandwidth_capacity = param['min_bandwidth_capacity']
+        self.max_bandwidth_capacity = param['max_bandwidth_capacity']
         
         # User-specified frequencies (optional)
         self.fc = fc
         self.fe = fe
         self.edge_n = edge_num
+        self.cloud_n = cloud_num
             
         # Computing resource capacities
         self.cloud_C = param['cloud_C']
@@ -54,16 +58,15 @@ class SDN_Env():
         self.edge_user_dist_H = param['edge_user_dist_H']
         self.edge_user_dist_L = param['edge_user_dist_L']
 
-        # Data rate parameters
-        self.cloud_off_datarate = param['cloud_off_datarate']
-        self.edge_off_datarate = param['edge_off_datarate']
-        
+        # Initialize cloud_off_datarate and edge_off_datarate with random data rates
+        self.cloud_off_datarate = np.random.uniform(10e6, 100e6, size=(self.cloud_num_H, self.user_num))
+        self.edge_off_datarate = np.random.uniform(1e6, 10e6, size=(self.edge_num_H, self.user_num))
 
-        self.edge_band_width = param['edge_band_width']  
+        self.edge_off_band_width = param['edge_off_band_width']  
         self.cloud_off_band_width = param['cloud_off_band_width'] 
 
         # Bandwidth capacity between user and edge server
-        self.LC = np.random.uniform(param['min_bandwidth_capacity'], param['max_bandwidth_capacity'], size=(self.user_num, self.edge_num))
+        self.LC = np.random.uniform(param['min_bandwidth_capacity'], param['max_bandwidth_capacity'], size=(self.user_num, self.edge_n))
 
         # Reward parameter
         self.reward_alpha = param['reward_alpha']
@@ -74,7 +77,6 @@ class SDN_Env():
         # Initialize the environment
         self.reset()  
 
-    
     def reset(self):
         # Reset environment variables
         self.step_cnt = 0
@@ -87,8 +89,8 @@ class SDN_Env():
         self.rew_e = 0
         self.arrive_flag = False
         self.invalid_act_flag = False
-        self.cloud_off_list = []
-        self.cloud_exe_list = []
+        self.cloud_off_lists = []
+        self.cloud_exe_lists = []
         self.edge_off_lists = []
         self.edge_exe_lists = []
         self.unassigned_task_list = []
@@ -105,21 +107,25 @@ class SDN_Env():
         # Set the action space size based on the number of edge servers
         self.action_space = self.edge_num + self.cloud_num
 
+        # Initialize cloud_off_datarate and edge_off_datarate with random data rates
+        self.cloud_off_datarate = np.random.uniform(10e6, 100e6, size=(self.cloud_num, self.user_num))
+        self.edge_off_datarate = np.random.uniform(1e6, 10e6, size=(self.edge_num, self.user_num))
+
         # Initialize finish time array for cloud and edge servers
         self.finish_time = np.array([0] * (self.edge_num + self.cloud_num))
 
         # Randomly determine cloud CPU frequency and edge CPU frequencies
-        self.cloud_cpu_freqs = np.random.uniform(self.cloud_freq - self.cloud_cpu_freq_peak, self.cloud_freq + self.cloud_cpu_freq_peak, size=self.cloud_num)
-        self.cloud_cpu_freq = self.fc if self.fc else self.cloud_cpu_freq
+        self.cloud_cpu_freqs = np.random.uniform(min(self.cloud_freq) - self.cloud_cpu_freq_peak, max(self.cloud_freq) + self.cloud_cpu_freq_peak, size=self.cloud_num)
+        self.cloud_cpu_freq = [self.fc if self.fc else self.cloud_cpu_freq for _ in range(self.cloud_num)]
         self.edge_cpu_freq = [0] * self.edge_num
 
         # Bandwidth capacity between user and edge server
-        self.LC = np.random.uniform(param['min_bandwidth_capacity'], param['max_bandwidth_capacity'], size=(self.user_num, self.edge_num))
+        self.LC = np.random.uniform(self.min_bandwidth_capacity, self.max_bandwidth_capacity, size=(self.user_num, self.edge_num))
 
         # Calculate task size exponential theta based on CPU frequencies and capacities
         self.task_size_exp_theta = 0  # Reset the value
         for i in range(self.edge_num):
-            self.edge_cpu_freq[i] = np.random.uniform(self.edge_freq - self.edge_cpu_freq_peak, self.edge_freq + self.edge_cpu_freq_peak)
+            self.edge_cpu_freq[i] = np.random.uniform(min(self.edge_freq) - self.edge_cpu_freq_peak, max(self.edge_freq) + self.edge_cpu_freq_peak)
             self.edge_cpu_freq[i] = self.fe if self.fe else self.edge_cpu_freq[i]
             self.edge_off_lists.append([])
             self.edge_exe_lists.append([])
@@ -127,7 +133,7 @@ class SDN_Env():
 
         # Calculate task size exponential theta for cloud servers
         for i in range(self.cloud_num):
-            self.cloud_cpu_freqs[i] = np.random.uniform(self.cloud_freq - self.cloud_cpu_freq_peak, self.cloud_freq + self.cloud_cpu_freq_peak)
+            self.cloud_cpu_freqs[i] = np.random.uniform(min(self.cloud_freq) - self.cloud_cpu_freq_peak, max(self.cloud_freq) + self.cloud_cpu_freq_peak)
             self.cloud_cpu_freqs[i] = self.fc if self.fc else self.cloud_cpu_freqs[i]
             self.cloud_off_lists.append([])
             self.cloud_exe_lists.append([])
@@ -137,12 +143,17 @@ class SDN_Env():
         self.done = False
         self.reward_buff = []
 
-        # Generate random user distances for cloud and edge servers
+        # Initialize user distance
+        self.user_dist = np.array([])
+
+        # Generate random user distances for cloud servers
         for i in range(self.cloud_num):
-            cloud_dist = np.random.uniform(self.cloud_user_dist_L, self.cloud_user_dist_H, size=(1, self.user_num))
+            cloud_dist = np.random.uniform(self.cloud_user_dist_L, self.cloud_user_dist_H, size=self.user_num)
             self.user_dist = np.concatenate((self.user_dist, cloud_dist), axis=0)
+
+        # Generate random user distances for edge servers
         for i in range(self.edge_num):
-            edge_dist = np.random.uniform(self.edge_user_dist_L, self.edge_user_dist_H, size=(1, self.user_num))
+            edge_dist = np.random.uniform(self.edge_user_dist_L, self.edge_user_dist_H, size=self.user_num)
             self.user_dist = np.concatenate((self.user_dist, edge_dist), axis=0)
 
         # Generate tasks for the environment
@@ -164,7 +175,7 @@ class SDN_Env():
         #####################################################
         # Assignment of tasks (Phân công công việc)
         if self.arrive_flag:
-            assert actions <= self.edge_num and actions <= self.cloud_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d' % (
+            assert actions <= self.edge_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d' % (
             actions, self.edge_num)
             self.action = actions
             self.arrive_flag = False
@@ -176,16 +187,17 @@ class SDN_Env():
             the_task['off_time'] = 0
             the_task['wait_time'] = 0
             the_task['exe_time'] = 0
-            the_task['off_link_utilisation'] = 0  
-            the_task['exe_link_utilisation'] = 0  
+            the_task['off_link_utilisation'] = 0  # Initialize offloading link utilization
+            the_task['exe_link_utilisation'] = 0  # Initialize execution link utilization
 
         if actions == ACTION_TO_CLOUD:
-            the_task['to'] = 0
-            # Calculate non-offloading link utilization based on the provided formula
-            off_link_utilisation = np.sum([self.cloud_off_lists[m]['size'] for m in range(len(self.cloud_off_list))]) / (
-                    self.cloud_off_band_width * self.dt)
+            c = actions
+            the_task['to'] = c
+            # Calculate offloading link utilization based on the provided formula
+            off_link_utilisation = np.sum([self.cloud_off_lists[m][c-1]['size'] for m in range(len(self.cloud_off_lists[c-1]))]) / (
+                    self.cloud_off_band_width[c-1] * self.dt)
             the_task['off_link_utilisation'].append(off_link_utilisation)
-            self.cloud_off_list.append(the_task)
+            self.cloud_off_lists[c-1].append(the_task)
         else:
             e = actions
             the_task['to'] = e
@@ -203,17 +215,17 @@ class SDN_Env():
         #####################################################
         # Cloud network (Mạng đám mây)
         # Advance the progress of task offloading and execution (Tiến triển tiến độ giải nhiệm công việc và thực hiện)
+        used_time = 0
         for n in range(self.cloud_num):
-            used_time = 0
             while (used_time < self.dt):
                 off_estimate_time = []
                 exe_estimate_time = []
-                task_off_num = len(self.cloud_off_list)
-                task_exe_num = len(self.cloud_exe_list)
+                task_off_num = len(self.cloud_off_lists[n])
+                task_exe_num = len(self.cloud_exe_list[n])
                 # Estimate offloading time (Ước lượng thời gian giải nhiệm)
                 for i in range(task_off_num):
-                    the_user = self.cloud_off_list[i]['user_id']
-                    estimate_time = self.cloud_off_list[i]['remain'] / self.cloud_off_datarate[the_user]
+                    the_user = self.cloud_off_lists[n][i]['user_id']
+                    estimate_time = self.cloud_off_lists[n][i]['remain'] / self.cloud_off_datarate[n, the_user]
                     off_estimate_time.append(estimate_time)
                 # Estimate execution time (Ước lượng thời gian thực hiện)
                 if task_exe_num > 0:
@@ -233,36 +245,36 @@ class SDN_Env():
                 cloud_pre_exe_list = []
                 retain_flag_off = np.ones(task_off_num, dtype=np.bool)
                 for i in range(task_off_num):
-                    the_user = self.cloud_off_list[i]['user_id']
-                    self.cloud_off_list[i]['remain'] -= self.cloud_off_datarate[the_user] * run_time
-                    self.cloud_off_list[i]['off_link_utilisation'] += (
-                        np.sum([task['size'] for task in self.cloud_off_list]) *
-                        self.cloud_off_list[i]['size']
+                    the_user = self.cloud_off_lists[i]['user_id']
+                    self.cloud_off_lists[n][i]['remain'] -= self.cloud_off_datarate[n, the_user] * run_time
+                    self.cloud_off_lists[n][i]['off_link_utilisation'] += (
+                        np.sum([task['size'] for task in self.cloud_off_lists]) *
+                        self.cloud_off_lists[n][i]['size']
                     ) / (self.LC[the_user] * self.dt)
-                    if self.cloud_off_list[i]['remain'] <= ZERO_RES:
+                    if self.cloud_off_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_off[i] = False
-                        the_task = deepcopy(self.cloud_off_list[i])
-                        the_task['remain'] = self.cloud_off_list[i]['size']
+                        the_task = deepcopy(self.cloud_off_lists[i])
+                        the_task['remain'] = self.cloud_off_lists[i]['size']
                         cloud_pre_exe_list.append(the_task)
                 pt = 0
                 for i in range(task_off_num):
                     if retain_flag_off[i] == False:
-                        self.cloud_off_list.pop(pt)
+                        self.cloud_off_lists.pop(pt)
                     else:
                         pt += 1
                 # Advance execution (Tiến triển thực hiện)
                 if task_exe_num > 0:
-                    cloud_exe_size = self.cloud_cpu_freq * run_time / (self.cloud_C * task_exe_num)
+                    cloud_exe_size = self.cloud_cpu_freq[n] * run_time / (self.cloud_C * task_exe_num)
                     cloud_exe_link_utilisation = (
                         np.sum([task['size'] for task in self.cloud_exe_list]) *
                         cloud_exe_size
                     ) / (self.LC[0] * self.dt)
                 retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
                 for i in range(task_exe_num):
-                    self.cloud_exe_list[i]['remain'] -= cloud_exe_size
-                    self.cloud_exe_list[i]['exe_link_utilisation'] += cloud_exe_link_utilisation
-                    self.cloud_exe_list[i]['exe_time'] += run_time
-                    if self.cloud_exe_list[i]['remain'] <= ZERO_RES:
+                    self.cloud_exe_list[n][i]['remain'] -= cloud_exe_size
+                    self.cloud_exe_list[n][i]['exe_link_utilisation'] += cloud_exe_link_utilisation
+                    self.cloud_exe_list[n][i]['exe_time'] += run_time
+                    if self.cloud_exe_list[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
                 pt = 0
                 for i in range(task_exe_num):
@@ -308,7 +320,7 @@ class SDN_Env():
                     the_user = self.edge_off_lists[n][i]['user_id']
                     self.edge_off_lists[n][i]['remain'] -= self.edge_off_datarate[n, the_user] * run_time
                     self.edge_off_lists[n][i]['off_link_utilisation'] += (self.edge_off_datarate[n, the_user] * run_time) / (
-            self.edge_band_width * task_off_num)
+            self.edge_off_band_width * task_off_num)
                     self.edge_off_lists[n][i]['off_time'] += run_time
                     if self.edge_off_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_off[i] = False
@@ -325,13 +337,13 @@ class SDN_Env():
                 if task_exe_num > 0:
                     edge_exe_size = self.edge_cpu_freq[n] * run_time / (self.edge_C * task_exe_num)
                     # Calculate exe_link_utilisation using the provided formula
-                    edge_exe_link_utilisation = (edge_exe_size * self.edge_exe_list[n]['exe_link_utilisation']) / (
+                    edge_exe_link_utilisation = (edge_exe_size * self.edge_exe_lists[n]['exe_link_utilisation']) / (
                         self.LC[n] * self.dt
                     )
                 retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
                 for i in range(task_exe_num):
                     self.edge_exe_lists[n][i]['remain'] -= edge_exe_size
-                    self.edge_exe_list[i]['exe_link_utilisation'] += edge_exe_link_utilisation                    
+                    self.edge_exe_lists[i]['exe_link_utilisation'] += edge_exe_link_utilisation                    
                     self.edge_exe_lists[n][i]['exe_time'] += run_time
                     if self.edge_exe_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
@@ -398,23 +410,25 @@ class SDN_Env():
         obs = {}
         
         servers = []
-        cloud = []
-        cloud.append(1)
-        cloud.append(self.cloud_cpu_freq/1e9)
-        cloud.append(self.edge_num)
-        cloud.append(self.task_size/1e6)
-        cloud.append(1-self.done)
-        cloud.append(self.cloud_off_datarate[self.task_user_id]/1e6/100)
-        cloud.append(len(self.cloud_exe_list))
-        task_exe_hist = np.zeros([60])
-        n = 0
-        for task in self.cloud_exe_list:
-            task_feature = int(task['remain']/1e6)
-            if task_feature>=60:
-                task_feature = 59
-            task_exe_hist[task_feature] += 1
-        cloud = np.concatenate([np.array(cloud), task_exe_hist], axis=0)
-        servers.append(cloud)
+
+        for ii in range(self.cloud_num):
+            cloud = []
+            cloud.append(1)
+            cloud.append(self.cloud_cpu_freq[ii]/1e9)
+            cloud.append(self.cloud_num)
+            cloud.append(self.task_size/1e6)
+            cloud.append(1-self.done)
+            cloud.append(self.cloud_off_datarate[ii, self.task_user_id]/1e6/100)
+            cloud.append(len(self.cloud_exe_lists[ii]))
+            task_exe_hist = np.zeros([60])
+            n = 0
+            for task in self.cloud_exe_lists[ii]:
+                task_feature = int(task['remain']/1e6)
+                if task_feature>=60:
+                    task_feature = 59
+                task_exe_hist[task_feature] += 1
+            cloud = np.concatenate([np.array(cloud), task_exe_hist], axis=0)
+            servers.append(cloud)
         
         for ii in range(self.edge_num):
             edge = []
@@ -512,6 +526,8 @@ class SDN_Env():
         return reward
 
     
-    def rander(self):
+    def render(self):
+        pass
+    def close(self):
         pass
     
