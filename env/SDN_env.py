@@ -1,3 +1,5 @@
+import gymnasium as gym
+from gymnasium import spaces
 from copy import deepcopy
 import numpy as np
 import json
@@ -8,7 +10,7 @@ ACTION_TO_CLOUD = 0
 ZERO_RES = 1e-6
 MAX_EDGE_NUM = 10
         
-class SDN_Env():
+class SDN_Env(gym.Env):
     def __init__(self, conf_file='config1.json', conf_name='SDN_Config1', w=1.0, fc=None, fe=None, edge_num=None, cloud_num=None,):
         # Read configuration file
         config = json.load(open(conf_file, 'r'))
@@ -73,11 +75,14 @@ class SDN_Env():
         
         # Weight parameter
         self.w = w
-        
+        # Observation space parameters
+        observation_space_shape = 6 * self.cloud_num_H + 6 * self.edge_num_H
+        self.observation_space = spaces.Box(low=0, high=1, shape=(observation_space_shape,), dtype=np.float32)
+
         # Initialize the environment
         self.reset()  
 
-    def reset(self):
+    def reset(self, **kwargs):
         # Reset environment variables
         self.step_cnt = 0
         self.task_size = 0
@@ -159,8 +164,8 @@ class SDN_Env():
         # Generate tasks for the environment
         self.generate_task()
 
-        # Return the initial observation
-        return self.get_obs()
+        # Return the initial observation and an empty info dictionary
+        return self.get_obs(), {}
 
                
     def step(self, actions):
@@ -221,7 +226,7 @@ class SDN_Env():
                 off_estimate_time = []
                 exe_estimate_time = []
                 task_off_num = len(self.cloud_off_lists[n])
-                task_exe_num = len(self.cloud_exe_list[n])
+                task_exe_num = len(self.cloud_exe_lists[n])
                 # Estimate offloading time (Ước lượng thời gian giải nhiệm)
                 for i in range(task_off_num):
                     the_user = self.cloud_off_lists[n][i]['user_id']
@@ -231,7 +236,7 @@ class SDN_Env():
                 if task_exe_num > 0:
                     cloud_exe_rate = self.cloud_cpu_freq / (self.cloud_C * task_exe_num)
                 for i in range(task_exe_num):
-                    estimate_time = self.cloud_exe_list[i]['remain'] / cloud_exe_rate
+                    estimate_time = self.cloud_exe_lists[i]['remain'] / cloud_exe_rate
                     exe_estimate_time.append(estimate_time)
                 # Run (in the shortest time) (Chạy - thời gian ngắn nhất)
                 if len(off_estimate_time) + len(exe_estimate_time) > 0:
@@ -266,23 +271,23 @@ class SDN_Env():
                 if task_exe_num > 0:
                     cloud_exe_size = self.cloud_cpu_freq[n] * run_time / (self.cloud_C * task_exe_num)
                     cloud_exe_link_utilisation = (
-                        np.sum([task['size'] for task in self.cloud_exe_list]) *
+                        np.sum([task['size'] for task in self.cloud_exe_lists]) *
                         cloud_exe_size
                     ) / (self.LC[0] * self.dt)
                 retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
                 for i in range(task_exe_num):
-                    self.cloud_exe_list[n][i]['remain'] -= cloud_exe_size
-                    self.cloud_exe_list[n][i]['exe_link_utilisation'] += cloud_exe_link_utilisation
-                    self.cloud_exe_list[n][i]['exe_time'] += run_time
+                    self.cloud_exe_lists[n][i]['remain'] -= cloud_exe_size
+                    self.cloud_exe_lists[n][i]['exe_link_utilisation'] += cloud_exe_link_utilisation
+                    self.cloud_exe_lists[n][i]['exe_time'] += run_time
                     if self.cloud_exe_list[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
                 pt = 0
                 for i in range(task_exe_num):
                     if retain_flag_exe[i] == False:
-                        self.cloud_exe_list.pop(pt)
+                        self.cloud_exe_lists.pop(pt)
                     else:
                         pt += 1
-                self.cloud_exe_list = self.cloud_exe_list + cloud_pre_exe_list
+                self.cloud_exe_lists = self.cloud_exe_lists + cloud_pre_exe_list
                 used_time += run_time
         #####################################################
         # Edge network (Mạng nút edge)
@@ -408,42 +413,43 @@ class SDN_Env():
     
     def get_obs(self):
         obs = {}
-        
         servers = []
 
         for ii in range(self.cloud_num):
-            cloud = []
-            cloud.append(1)
-            cloud.append(self.cloud_cpu_freq[ii]/1e9)
-            cloud.append(self.cloud_num)
-            cloud.append(self.task_size/1e6)
-            cloud.append(1-self.done)
-            cloud.append(self.cloud_off_datarate[ii, self.task_user_id]/1e6/100)
-            cloud.append(len(self.cloud_exe_lists[ii]))
+            cloud = [
+                1,
+                self.cloud_cpu_freq[ii] / 1e9,
+                self.cloud_num,
+                self.task_size / 1e6,
+                1 - self.done,
+                self.cloud_off_datarate[ii, self.task_user_id] / 1e6 / 100,
+                len(self.cloud_exe_lists[ii]),
+            ]
             task_exe_hist = np.zeros([60])
             n = 0
             for task in self.cloud_exe_lists[ii]:
-                task_feature = int(task['remain']/1e6)
-                if task_feature>=60:
+                task_feature = int(task['remain'] / 1e6)
+                if task_feature >= 60:
                     task_feature = 59
                 task_exe_hist[task_feature] += 1
             cloud = np.concatenate([np.array(cloud), task_exe_hist], axis=0)
             servers.append(cloud)
-        
+
         for ii in range(self.edge_num):
-            edge = []
-            edge.append(1)
-            edge.append(self.edge_cpu_freq[ii]/1e9)
-            edge.append(self.edge_num)
-            edge.append(self.task_size/1e6)
-            edge.append(1-self.done)
-            edge.append(self.edge_off_datarate[ii,self.task_user_id]/1e6/100)
-            edge.append(len(self.edge_exe_lists[ii]))
+            edge = [
+                1,
+                self.edge_cpu_freq[ii] / 1e9,
+                self.edge_num,
+                self.task_size / 1e6,
+                1 - self.done,
+                self.edge_off_datarate[ii, self.task_user_id] / 1e6 / 100,
+                len(self.edge_exe_lists[ii]),
+            ]
             task_exe_hist = np.zeros([60])
             n = 0
             for task in self.edge_exe_lists[ii]:
-                task_feature = int(task['remain']/1e6)
-                if task_feature>=60:
+                task_feature = int(task['remain'] / 1e6)
+                if task_feature >= 60:
                     task_feature = 59
                 task_exe_hist[task_feature] += 1
             edge = np.concatenate([np.array(edge), task_exe_hist], axis=0)
@@ -453,11 +459,12 @@ class SDN_Env():
         
         re = obs['servers']
         return re
+
     
     def estimate_rew(self):
         remain_list = []
         if self.action == ACTION_TO_CLOUD:
-            for task in self.cloud_exe_list:
+            for task in self.cloud_exe_lists:
                 remain_list.append(task['remain'])
             computing_speed = self.cloud_cpu_freq/self.cloud_C
             offload_time = self.task_size/self.cloud_off_datarate[self.task_user_id] if self.task_size>0 else 0
@@ -525,9 +532,9 @@ class SDN_Env():
         reward = self.w * reward_dt + (1.0 - self.w) * reward_dlu
         return reward
 
-    
-    def render(self):
+    def seed(self, seed=None):
+        np.random.seed(seed)
+
+    def render(self, mode='human'):
+        # Implement rendering logic if needed
         pass
-    def close(self):
-        pass
-    
