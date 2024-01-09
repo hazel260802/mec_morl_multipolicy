@@ -16,6 +16,7 @@ from tqdm import tqdm
 from env import SDN_Env
 from network import conv_mlp_net
 
+cloud_num = 1
 edge_num = 1
 expn = 'exp1'
 config = 'multi-edge'
@@ -52,11 +53,11 @@ class sdn_net(nn.Module):
         self.mode = mode
 
         if self.mode == 'actor':
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num + 1) * FEATURE_CH,
-                                        mlp_ch=MLP_CH, out_ch=edge_num + 1, block_num=3)
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num + cloud_num) * FEATURE_CH,
+                                        mlp_ch=MLP_CH, out_ch=edge_num + cloud_num, block_num=3)
         else:
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num + 1) * FEATURE_CH,
-                                        mlp_ch=MLP_CH, out_ch=1, block_num=3)
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num + cloud_num) * FEATURE_CH,
+                                        mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -134,7 +135,7 @@ optim = torch.optim.Adam(actor_critic.parameters(), lr=lr)
 
 dist = torch.distributions.Categorical
 
-action_space = gym.spaces.Discrete(edge_num)
+action_space = gym.spaces.Discrete(edge_num+cloud_num)
 
 if lr_decay:
     lr_scheduler = LambdaLR(
@@ -154,7 +155,7 @@ policy = ts.policy.PPOPolicy(actor, critic, optim, dist,
 
 for i in range(101):
     try:
-        os.mkdir('save/pth-e%d/' % (edge_num) + expn + '/w%03d' % (i))
+        os.mkdir('save/pth-e%d/' % (edge_num) + 'cloud%d/' % (cloud_num) + expn + '/w%03d' % (i))
     except:
         pass
 
@@ -167,9 +168,9 @@ for wi in range(100, 0 - 1, -2):
         epoch_a = epoch
 
     train_envs = DummyVectorEnv(
-        [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num) for _ in range(train_num)])
+        [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(train_num)])
     test_envs = DummyVectorEnv(
-        [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num) for _ in range(test_num)])
+        [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(test_num)])
 
     buffer = ts.data.VectorReplayBuffer(buffer_size, train_num)
     train_collector = ts.data.Collector(policy, train_envs, buffer)
@@ -179,9 +180,9 @@ for wi in range(100, 0 - 1, -2):
     def save_best_fn(policy):
         pass
 
-    def test_fn(epoch, env_step):
-        policy.actor.save_model('save/pth-e%d/' % (edge_num) + expn + '/w%03d/ep%02d-actor.pth' % (wi, epoch))
-        policy.critic.save_model('save/pth-e%d/' % (edge_num) + expn + '/w%03d/ep%02d-critic.pth' % (wi, epoch))
+    def test_fn(epoch, env_step, cloud_num):
+        policy.actor.save_model('save/pth-e%d/' % (edge_num) + 'cloud%d/' % (cloud_num) + expn + '/w%03d/ep%02d-actor.pth' % (wi, epoch))
+        policy.critic.save_model('save/pth-e%d/' % (edge_num) + 'cloud%d/' % (cloud_num) + expn + '/w%03d/ep%02d-critic.pth' % (wi, epoch))
 
     def train_fn(epoch, env_step):
         pass

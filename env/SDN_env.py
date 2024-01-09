@@ -409,58 +409,58 @@ class SDN_Env(gym.Env):
                 self.task_size = 0
                 self.task_user_id = np.random.randint(0, self.user_num)
 
-
-    
     def get_obs(self):
         obs = {}
         servers = []
-
         for ii in range(self.cloud_num):
-            cloud = [
-                1,
-                self.cloud_cpu_freq[ii] / 1e9,
-                self.cloud_num,
-                self.task_size / 1e6,
-                1 - self.done,
-                self.cloud_off_datarate[ii, self.task_user_id] / 1e6 / 100,
-                len(self.cloud_exe_lists[ii]),
-            ]
-            task_exe_hist = np.zeros([60])
+            cloud = []
+            cloud.append(1.0)
+            cloud.append(float(self.cloud_cpu_freq[ii] / 1e9))
+            cloud.append(float(self.cloud_num))
+            cloud.append(float(self.task_size / 1e6))
+            cloud.append(float(1 - self.done))
+            cloud.append(float(self.cloud_off_datarate[ii, self.task_user_id] / 1e6 / 100))
+            cloud.append(float(len(self.cloud_exe_lists[ii])))
+            task_exe_hist = np.zeros([60], dtype=float)  # Ensure float data type
+
             n = 0
             for task in self.cloud_exe_lists[ii]:
                 task_feature = int(task['remain'] / 1e6)
                 if task_feature >= 60:
                     task_feature = 59
-                task_exe_hist[task_feature] += 1
-            cloud = np.concatenate([np.array(cloud), task_exe_hist], axis=0)
+                task_exe_hist[task_feature] += 1.0  # Ensure float data type
+            cloud = np.concatenate([np.array(cloud, dtype=float), task_exe_hist], axis=0)
             servers.append(cloud)
 
         for ii in range(self.edge_num):
-            edge = [
-                1,
-                self.edge_cpu_freq[ii] / 1e9,
-                self.edge_num,
-                self.task_size / 1e6,
-                1 - self.done,
-                self.edge_off_datarate[ii, self.task_user_id] / 1e6 / 100,
-                len(self.edge_exe_lists[ii]),
-            ]
-            task_exe_hist = np.zeros([60])
+            edge = []
+            edge.append(1.0)
+            edge.append(float(self.edge_cpu_freq[ii] / 1e9))
+            edge.append(float(self.edge_num))
+            edge.append(float(self.task_size / 1e6))
+            edge.append(float(1 - self.done))
+            edge.append(float(self.edge_off_datarate[ii, self.task_user_id] / 1e6 / 100))
+            edge.append(float(len(self.edge_exe_lists[ii])))
+            task_exe_hist = np.zeros([60], dtype=float)  # Ensure float data type
+
             n = 0
             for task in self.edge_exe_lists[ii]:
                 task_feature = int(task['remain'] / 1e6)
                 if task_feature >= 60:
                     task_feature = 59
-                task_exe_hist[task_feature] += 1
-            edge = np.concatenate([np.array(edge), task_exe_hist], axis=0)
+                task_exe_hist[task_feature] += 1.0  # Ensure float data type
+            edge = np.concatenate([np.array(edge, dtype=float), task_exe_hist], axis=0)
             servers.append(edge)
-        
-        obs['servers'] = np.array(servers).swapaxes(0,1)
-        
-        re = obs['servers']
-        return re
 
-    
+        # Concatenate the combined servers array
+        servers_combined = np.vstack(servers)
+
+        print(servers_combined)
+            
+        obs['servers'] = servers_combined.astype(np.float32)
+        return obs['servers']
+
+
     def estimate_rew(self):
         remain_list = []
         if self.action == ACTION_TO_CLOUD:
