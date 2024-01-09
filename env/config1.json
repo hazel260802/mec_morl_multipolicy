@@ -11,6 +11,7 @@
     "task_size_L": 0.1e6,
     "task_size_H": 30e6,
     "edge_num": 10,
+    "cloud_num": 10,
     "cloud_cpu_freq": [4e9],
     "edge_cpu_freq": [2e9],
     "cloud_C": 1e3,

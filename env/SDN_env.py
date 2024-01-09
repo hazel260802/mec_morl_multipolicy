@@ -11,7 +11,7 @@ ZERO_RES = 1e-6
 MAX_EDGE_NUM = 10
         
 class SDN_Env(gym.Env):
-    def __init__(self, conf_file='config1.json', conf_name='SDN_Config1', w=1.0, fc=None, fe=None, edge_num=None, cloud_num=None,):
+    def __init__(self, conf_file='config1.json', conf_name='SDN_Config1', w=1.0, fc=None, fe=None, edge_num=None, cloud_num=None):
         # Read configuration file
         config = json.load(open(conf_file, 'r'))
         param = config[conf_name]
@@ -180,8 +180,8 @@ class SDN_Env(gym.Env):
         #####################################################
         # Assignment of tasks (Phân công công việc)
         if self.arrive_flag:
-            assert actions <= self.edge_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d' % (
-            actions, self.edge_num)
+            assert actions <= self.edge_num and actions <= self.cloud_num and actions >= ACTION_TO_CLOUD, 'action not in the interval %d, %d, %d' % (
+            actions, self.edge_num, self.cloud_num)
             self.action = actions
             self.arrive_flag = False
             the_task = {}
@@ -452,13 +452,17 @@ class SDN_Env(gym.Env):
             edge = np.concatenate([np.array(edge, dtype=float), task_exe_hist], axis=0)
             servers.append(edge)
 
-        # Concatenate the combined servers array
-        servers_combined = np.vstack(servers)
+        # # Concatenate the combined servers array
+        # servers_combined = np.vstack(servers)
 
-        print(servers_combined)
+        # # print(servers_combined)
             
-        obs['servers'] = servers_combined.astype(np.float32)
-        return obs['servers']
+        # obs['servers'] = servers_combined.astype(np.float32)
+        obs['servers'] = np.array(servers).swapaxes(0,1)
+        
+        re = obs['servers']
+        print(re)
+        return re
 
 
     def estimate_rew(self):
