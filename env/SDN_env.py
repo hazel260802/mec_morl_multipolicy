@@ -94,9 +94,9 @@ class SDN_Env(gym.Env):
         self.rew_e = 0
         self.arrive_flag = False
         self.invalid_act_flag = False
-        self.cloud_off_lists = []
+        self.cloud_off_lists = [[] for _ in range(self.cloud_n)]
         self.cloud_exe_lists = []
-        self.edge_off_lists = []
+        self.edge_off_lists = [[] for _ in range(self.edge_n)]
         self.edge_exe_lists = []
         self.unassigned_task_list = []
         self.action = ACTION_TO_CLOUD
@@ -164,6 +164,9 @@ class SDN_Env(gym.Env):
         # Generate tasks for the environment
         self.generate_task()
 
+        # Print the size of the state (ra)
+        # print(f"Size of State (ra): {self.get_obs().shape}")
+
         # Return the initial observation and an empty info dictionary
         return self.get_obs(), {}
 
@@ -194,22 +197,23 @@ class SDN_Env(gym.Env):
             the_task['exe_time'] = 0
             the_task['off_link_utilisation'] = 0  # Initialize offloading link utilization
             the_task['exe_link_utilisation'] = 0  # Initialize execution link utilization
-
+        print(f"Actions: {actions}")
         if actions == ACTION_TO_CLOUD:
             c = actions
             the_task['to'] = c
             # Calculate offloading link utilization based on the provided formula
-            off_link_utilisation = np.sum([self.cloud_off_lists[m][c-1]['size'] for m in range(len(self.cloud_off_lists[c-1]))]) / (
-                    self.cloud_off_band_width[c-1] * self.dt)
-            the_task['off_link_utilisation'].append(off_link_utilisation)
-            self.cloud_off_lists[c-1].append(the_task)
+            off_link_utilisation = np.sum([self.cloud_off_lists[m][c]['size'] for m in range(len(self.cloud_off_lists[c]))]) / (
+                    self.cloud_off_band_width[c] * self.dt)
+            the_task['off_link_utilisation']= off_link_utilisation
+            self.cloud_off_lists[c].append(the_task)
         else:
             e = actions
             the_task['to'] = e
+
             # Calculate offloading link utilization based on the provided formula
             off_link_utilisation = np.sum([self.edge_off_lists[m][e - 1]['size'] for m in range(len(self.edge_off_lists[e - 1]))]) / (
                     self.edge_off_band_width[e - 1] * self.dt)
-            the_task['off_link_utilisation'].append(off_link_utilisation)
+            the_task['off_link_utilisation'] = off_link_utilisation
             self.edge_off_lists[e - 1].append(the_task)
 
         self.rew_t, self.rew_lu = self.estimate_rew()
@@ -222,10 +226,12 @@ class SDN_Env(gym.Env):
         # Advance the progress of task offloading and execution (Tiến triển tiến độ giải nhiệm công việc và thực hiện)
         used_time = 0
         for n in range(self.cloud_num):
+            print(self.cloud_num)
             while (used_time < self.dt):
                 off_estimate_time = []
                 exe_estimate_time = []
                 task_off_num = len(self.cloud_off_lists[n])
+                print(f"Cloud off lists: {self.cloud_off_lists[n]}, {len(self.cloud_off_lists[n])}")
                 task_exe_num = len(self.cloud_exe_lists[n])
                 # Estimate offloading time (Ước lượng thời gian giải nhiệm)
                 for i in range(task_off_num):
@@ -236,7 +242,7 @@ class SDN_Env(gym.Env):
                 if task_exe_num > 0:
                     cloud_exe_rate = self.cloud_cpu_freq / (self.cloud_C * task_exe_num)
                 for i in range(task_exe_num):
-                    estimate_time = self.cloud_exe_lists[i]['remain'] / cloud_exe_rate
+                    estimate_time = self.cloud_exe_lists[n][i]['remain'] / cloud_exe_rate
                     exe_estimate_time.append(estimate_time)
                 # Run (in the shortest time) (Chạy - thời gian ngắn nhất)
                 if len(off_estimate_time) + len(exe_estimate_time) > 0:
@@ -248,18 +254,18 @@ class SDN_Env(gym.Env):
 
                 # Advance offloading (Tiến triển giải nhiệm)
                 cloud_pre_exe_list = []
-                retain_flag_off = np.ones(task_off_num, dtype=np.bool)
+                retain_flag_off = np.ones(task_off_num, dtype=np.bool_)
                 for i in range(task_off_num):
-                    the_user = self.cloud_off_lists[i]['user_id']
+                    the_user = self.cloud_off_lists[n][i]['user_id']
                     self.cloud_off_lists[n][i]['remain'] -= self.cloud_off_datarate[n, the_user] * run_time
                     self.cloud_off_lists[n][i]['off_link_utilisation'] += (
-                        np.sum([task['size'] for task in self.cloud_off_lists]) *
+                        np.sum([task['size'] for task in self.cloud_off_lists[n]]) *
                         self.cloud_off_lists[n][i]['size']
                     ) / (self.LC[the_user] * self.dt)
                     if self.cloud_off_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_off[i] = False
-                        the_task = deepcopy(self.cloud_off_lists[i])
-                        the_task['remain'] = self.cloud_off_lists[i]['size']
+                        the_task = deepcopy(self.cloud_off_lists[n][i])
+                        the_task['remain'] = self.cloud_off_lists[n][i]['size']
                         cloud_pre_exe_list.append(the_task)
                 pt = 0
                 for i in range(task_off_num):
@@ -271,10 +277,11 @@ class SDN_Env(gym.Env):
                 if task_exe_num > 0:
                     cloud_exe_size = self.cloud_cpu_freq[n] * run_time / (self.cloud_C * task_exe_num)
                     cloud_exe_link_utilisation = (
-                        np.sum([task['size'] for task in self.cloud_exe_lists]) *
-                        cloud_exe_size
-                    ) / (self.LC[0] * self.dt)
-                retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
+                        np.sum([task['size'] * self.LC[task['user_id'], n] for task in self.cloud_exe_lists [n]]) /
+                        (self.LC[self.task_user_id, n] * self.dt)
+                    )
+
+                retain_flag_exe = np.ones(task_exe_num, dtype=np.bool_)
                 for i in range(task_exe_num):
                     self.cloud_exe_lists[n][i]['remain'] -= cloud_exe_size
                     self.cloud_exe_lists[n][i]['exe_link_utilisation'] += cloud_exe_link_utilisation
@@ -292,6 +299,7 @@ class SDN_Env(gym.Env):
         #####################################################
         # Edge network (Mạng nút edge)
         for n in range(self.edge_num):
+            print(self.edge_num)
             # Advance the progress of task offloading and execution (Tiến triển tiến độ giải nhiệm công việc và thực hiện)
             used_time = 0
             while (used_time < self.dt):
@@ -320,7 +328,7 @@ class SDN_Env(gym.Env):
 
                 # Advance offloading (Tiến triển giải nhiệm)
                 edge_pre_exe_list = []
-                retain_flag_off = np.ones(task_off_num, dtype=np.bool)
+                retain_flag_off = np.ones(task_off_num, dtype=np.bool_)
                 for i in range(task_off_num):
                     the_user = self.edge_off_lists[n][i]['user_id']
                     self.edge_off_lists[n][i]['remain'] -= self.edge_off_datarate[n, the_user] * run_time
@@ -342,13 +350,13 @@ class SDN_Env(gym.Env):
                 if task_exe_num > 0:
                     edge_exe_size = self.edge_cpu_freq[n] * run_time / (self.edge_C * task_exe_num)
                     # Calculate exe_link_utilisation using the provided formula
-                    edge_exe_link_utilisation = (edge_exe_size * self.edge_exe_lists[n]['exe_link_utilisation']) / (
+                    edge_exe_link_utilisation = (edge_exe_size * self.edge_exe_lists[n][i]['exe_link_utilisation']) / (
                         self.LC[n] * self.dt
                     )
-                retain_flag_exe = np.ones(task_exe_num, dtype=np.bool)
+                retain_flag_exe = np.ones(task_exe_num, dtype=np.bool_)
                 for i in range(task_exe_num):
                     self.edge_exe_lists[n][i]['remain'] -= edge_exe_size
-                    self.edge_exe_lists[i]['exe_link_utilisation'] += edge_exe_link_utilisation                    
+                    self.edge_exe_lists[n][i]['exe_link_utilisation'] += edge_exe_link_utilisation                    
                     self.edge_exe_lists[n][i]['exe_time'] += run_time
                     if self.edge_exe_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
@@ -375,10 +383,16 @@ class SDN_Env(gym.Env):
         # Reward calculation (Tính toán thưởng)
         reward = self.get_reward(finished_task)
 
+        # Print the size of the action
+        print(f"Size of Action: {actions}")
+
+        # Print the size of the reward
+        print(f"Size of Reward: {reward}")
         #####################################################
         # Additional information (Thông tin bổ sung)
         info = {}
-        return obs, reward, done, info
+        truncated = {}
+        return obs, reward, done, truncated, info
     
     def generate_task(self):
     #####################################################
@@ -456,22 +470,21 @@ class SDN_Env(gym.Env):
         # servers_combined = np.vstack(servers)
 
         # # print(servers_combined)
-            
         # obs['servers'] = servers_combined.astype(np.float32)
         obs['servers'] = np.array(servers).swapaxes(0,1)
         
         re = obs['servers']
-        print(re)
+        # print(re)
         return re
 
 
     def estimate_rew(self):
         remain_list = []
         if self.action == ACTION_TO_CLOUD:
-            for task in self.cloud_exe_lists:
+            for task in self.cloud_exe_lists[self.action]:
                 remain_list.append(task['remain'])
-            computing_speed = self.cloud_cpu_freq/self.cloud_C
-            offload_time = self.task_size/self.cloud_off_datarate[self.task_user_id] if self.task_size>0 else 0
+            computing_speed = self.cloud_cpu_freq[self.action-1]/self.cloud_C
+            offload_time = self.task_size/self.cloud_off_datarate[self.action-1][self.task_user_id] if self.task_size>0 else 0
         else:
             for task in self.edge_exe_lists[self.action-1]:
                 remain_list.append(task['remain'])

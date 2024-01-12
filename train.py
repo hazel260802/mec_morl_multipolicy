@@ -53,11 +53,11 @@ class sdn_net(nn.Module):
         self.mode = mode
 
         if self.mode == 'actor':
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num+1)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num+1, block_num=3)
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
         else:
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num+1)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=1, block_num=3)
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -71,11 +71,12 @@ class sdn_net(nn.Module):
     def forward(self, obs, state=None, info={}):
         state = obs  # ['servers']
         state = torch.tensor(state).float()
-        print(state.shape)
+        print("Input shape:", state.shape)
         if self.is_gpu:
             state = state.cuda()
 
         logits = self.network(state)
+        print("Output shape:", logits.shape)
 
         return logits, state
 

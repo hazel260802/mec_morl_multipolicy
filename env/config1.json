@@ -25,8 +25,8 @@
     "edge_user_dist_H": 500,
     "edge_user_dist_L": 50,
     "reward_alpha": 0.5,
-    "edge_off_band_width": 1e6,
-    "cloud_off_band_width": 2e6,
+    "edge_off_band_width": [1e6],
+    "cloud_off_band_width": [2e6],
     "min_bandwidth_capacity": 0.5e6,
     "max_bandwidth_capacity": 5e6 
   },
@@ -58,8 +58,8 @@
     "cloud_off_power": 0.01,
     "edge_off_power": 0.01,
     "reward_alpha": 0.5,
-    "edge_off_band_width": 1e6,
-    "cloud_off_band_width": 2e6,
+    "edge_off_band_width": [1e6],
+    "cloud_off_band_width": [2e6],
     "min_bandwidth_capacity": 0.5e6,
     "max_bandwidth_capacity": 5e6  
   }
