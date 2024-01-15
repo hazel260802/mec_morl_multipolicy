@@ -1,3 +1,5 @@
 network/__pycache__/
 env/__pycache__/
 tensor-board-log
+env/log
+env/save
