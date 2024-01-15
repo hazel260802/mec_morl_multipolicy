@@ -286,7 +286,7 @@ class SDN_Env(gym.Env):
                     self.cloud_exe_lists[n][i]['remain'] -= cloud_exe_size
                     self.cloud_exe_lists[n][i]['exe_link_utilisation'] += cloud_exe_link_utilisation
                     self.cloud_exe_lists[n][i]['exe_time'] += run_time
-                    if self.cloud_exe_list[n][i]['remain'] <= ZERO_RES:
+                    if self.cloud_exe_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
                 pt = 0
                 for i in range(task_exe_num):

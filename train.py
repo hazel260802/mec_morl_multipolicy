@@ -1,4 +1,5 @@
 import gymnasium as gym
+from tianshou.data.batch import Batch
 import torch
 import numpy as np
 import torch.nn as nn
@@ -46,6 +47,7 @@ MLP_CH = 1024
 
 
 
+
 class sdn_net(nn.Module):
     def __init__(self, mode='actor', is_gpu=is_gpu_default):
         super().__init__()
@@ -68,25 +70,32 @@ class sdn_net(nn.Module):
         torch.save(self.state_dict(), filename)
         # print('save model!')
 
-    def forward(self, obs, state=None, info={}):
-        state = obs  # ['servers']
-        state = torch.tensor(state).float()
+    def forward(self, batch, state=None):
+        if isinstance(batch, dict) and 'obs' in batch:
+            # If 'batch' is a dictionary and contains 'obs', extract it
+            state = batch['obs'].clone().detach().requires_grad_(True).to(torch.float32)
+        else:
+            # If 'batch' is a tensor, use it directly
+            state = batch.clone().detach().requires_grad_(True).to(torch.float32)
+
         print("Input shape:", state.shape)
+
         if self.is_gpu:
             state = state.cuda()
 
         logits = self.network(state)
-        print("Output shape:", logits.shape)
 
-        return logits, state
+        
+
+        print("Output:", logits.shape)
+
+        return Batch(obs=logits, state=state), None
 
 
 class Actor(nn.Module):
     def __init__(self, is_gpu=is_gpu_default):
         super().__init__()
-
         self.is_gpu = is_gpu
-
         self.net = sdn_net(mode='actor')
 
     def load_model(self, filename):
@@ -98,13 +107,24 @@ class Actor(nn.Module):
         torch.save(self.state_dict(), filename)
         # print('save model!')
 
-    def forward(self, obs, state=None, info={}):
+    def forward(self, batch, state=None, info=None):
+            if isinstance(batch, dict) and 'obs' in batch:
+                # If 'batch' is a dictionary and contains 'obs', extract it
+                state = batch['obs']
+            else:
+                # If 'batch' is a tensor, use it directly
+                state = batch
 
-        logits, _ = self.net(obs)
-        logits = F.softmax(logits, dim=-1)
+            if self.is_gpu:
+                state = state.cuda()
 
-        return logits, state
+            logits, _ = self.net(state)
 
+            print(type(logits.obs.clone().detach().requires_grad_(True)), state)
+            probs = F.softmax(logits.obs.clone().detach().requires_grad_(True), dim=-1).to(torch.float32)
+            print(type(probs))
+
+            return Batch(obs=probs, state=state), None
 
 class Critic(nn.Module):
     def __init__(self, is_gpu=is_gpu_default):
@@ -123,11 +143,25 @@ class Critic(nn.Module):
         torch.save(self.state_dict(), filename)
         # print('save model!')
 
-    def forward(self, obs, state=None, info={}):
+    def forward(self, batch, state=None):
+        print(f'forward: {batch, state}')
 
-        v, _ = self.net(obs)
+        if isinstance(batch, dict) and 'obs' in batch:
+            # If 'batch' is a dictionary and contains 'obs', extract it
+            state = batch['obs']
+        else:
+            # If 'batch' is a tensor, use it directly
+            state = batch
 
-        return v
+        print("Input shape:", state.shape)
+
+        if self.is_gpu:
+            state = state.cuda()
+
+        v, _ = self.net(state)
+        print("Forwarding", v)
+
+        return Batch(obs=v.obs, state=state), None
 
 
 actor = Actor(is_gpu=is_gpu_default)
@@ -173,9 +207,37 @@ for wi in range(100, 0 - 1, -2):
         [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(train_num)])
     test_envs = DummyVectorEnv(
         [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(test_num)])
-
     buffer = ts.data.VectorReplayBuffer(buffer_size, train_num)
-    train_collector = ts.data.Collector(policy, train_envs, buffer)
+    def preprocess_fn(**kwargs):
+        obs = kwargs.get("obs", np.array([[]]))
+        reward = kwargs.get("reward", 0)
+        done = kwargs.get("done", {})
+        truncated = kwargs.get("truncated", {})
+        info = kwargs.get("info", {})
+        env_id = kwargs.get("env_id", "default_value")
+        # Convert obs to a PyTorch tensor
+        obs = torch.tensor(obs, dtype=torch.float32)
+        batch = Batch(
+            obs=obs,  # Make sure to use the 'obs' attribute
+            reward=torch.tensor(reward, dtype=torch.float32),
+            done=done,
+            info=info,
+            truncated=truncated,
+            env_id=env_id,
+        )
+        print (batch)
+        # Assuming a normal environment step
+        return batch
+
+
+    # Initialize Collector with preprocess_fn
+    train_collector = ts.data.Collector(
+        policy=policy,
+        env=train_envs,
+        buffer=buffer,
+        preprocess_fn=preprocess_fn,
+    )
+
     test_collector = ts.data.Collector(policy, test_envs)
     train_collector.collect(n_episode=train_num)
 
@@ -193,7 +255,21 @@ for wi in range(100, 0 - 1, -2):
         return rews
 
     result = ts.trainer.onpolicy_trainer(
-        policy, train_collector, test_collector, epoch_a, step_per_epoch,
-        repeat_per_collect, test_num, batch_size,
-        episode_per_collect=episode_per_collect, save_best_fn=save_best_fn, logger=logger,
-        test_fn=test_fn, test_in_train=False)
+        policy=policy,
+        train_collector=train_collector,
+        test_collector=test_collector,
+        max_epoch=epoch_a,
+        step_per_epoch=step_per_epoch,
+        repeat_per_collect=repeat_per_collect,
+        episode_per_test=test_num,
+        batch_size=batch_size,
+        step_per_collect=None,
+        episode_per_collect=episode_per_collect,
+        train_fn=train_fn,
+        test_fn=test_fn,
+        save_best_fn=save_best_fn,
+        stop_fn=None,  # You may need to define your own stop function if needed
+        save_checkpoint_fn=save_best_fn,
+        reward_metric=reward_metric,
+        logger=logger,
+    )
