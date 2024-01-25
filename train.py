@@ -16,6 +16,7 @@ import math
 from tqdm import tqdm
 from env import SDN_Env
 from network import conv_mlp_net
+from tianshou.utils.net.discrete import Actor, Critic
 
 cloud_num = 1
 edge_num = 1
@@ -27,10 +28,10 @@ gamma, lr_decay = 0.9, None
 buffer_size = 100000
 eps_train, eps_test = 0.1, 0.00
 step_per_epoch, episode_per_collect = 100 * train_num * 700, train_num
-writer = SummaryWriter('tensor-board-log/ppo')  # tensorboard is also supported!
+writer = SummaryWriter('tensor-board-log/ppo')
 logger = ts.utils.TensorboardLogger(writer)
-is_gpu_default = torch.cuda.is_available()  # Check if GPU is available
-# ppo
+is_gpu_default = torch.cuda.is_available()
+
 gae_lambda, max_grad_norm = 0.95, 0.5
 vf_coef, ent_coef = 0.5, 0.0
 rew_norm, action_scaling = False, False
@@ -43,9 +44,6 @@ recompute_adv = 0
 INPUT_CH = 67
 FEATURE_CH = 512
 MLP_CH = 1024
-
-
-
 
 
 class sdn_net(nn.Module):
@@ -68,35 +66,25 @@ class sdn_net(nn.Module):
 
     def save_model(self, filename):
         torch.save(self.state_dict(), filename)
-        # print('save model!')
 
-    def forward(self, batch, state=None):
-        if isinstance(batch, dict) and 'obs' in batch:
-            # If 'batch' is a dictionary and contains 'obs', extract it
-            state = batch['obs'].clone().detach().requires_grad_(True).to(torch.float32)
-        else:
-            # If 'batch' is a tensor, use it directly
-            state = batch.clone().detach().requires_grad_(True).to(torch.float32)
-
+    def forward(self, obs, state=None, info={}):
+        state = torch.tensor(obs).float()
         print("Input shape:", state.shape)
-
         if self.is_gpu:
             state = state.cuda()
 
         logits = self.network(state)
+        print("Output shape:", logits)
 
-        
-
-        print("Output:", logits.shape)
-
-        return Batch(obs=logits, state=state), None
+        return logits, state
 
 
 class Actor(nn.Module):
-    def __init__(self, is_gpu=is_gpu_default):
+    def __init__(self, is_gpu=is_gpu_default, dist_fn=None):
         super().__init__()
         self.is_gpu = is_gpu
         self.net = sdn_net(mode='actor')
+        self.dist_fn = dist_fn  
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -105,29 +93,16 @@ class Actor(nn.Module):
 
     def save_model(self, filename):
         torch.save(self.state_dict(), filename)
-        # print('save model!')
 
-    def forward(self, batch, state=None, info=None):
-            if isinstance(batch, dict) and 'obs' in batch:
-                # If 'batch' is a dictionary and contains 'obs', extract it
-                state = batch['obs']
-            else:
-                # If 'batch' is a tensor, use it directly
-                state = batch
+    def forward(self, obs, state=None, info={}):
+        logits,_ = self.net(obs['obs'])
+        logits = F.softmax(logits, dim=-1)
 
-            if self.is_gpu:
-                state = state.cuda()
-
-            logits, _ = self.net(state)
-
-            print(type(logits.obs.clone().detach().requires_grad_(True)), state)
-            probs = F.softmax(logits.obs.clone().detach().requires_grad_(True), dim=-1).to(torch.float32)
-            print(type(probs))
-
-            return Batch(obs=probs, state=state), None
+        return logits, state
 
 class Critic(nn.Module):
     def __init__(self, is_gpu=is_gpu_default):
+        # print(f"Batch keys: {self.__dict__.keys()}")
         super().__init__()
 
         self.is_gpu = is_gpu
@@ -141,27 +116,12 @@ class Critic(nn.Module):
 
     def save_model(self, filename):
         torch.save(self.state_dict(), filename)
-        # print('save model!')
 
-    def forward(self, batch, state=None):
-        print(f'forward: {batch, state}')
+    def forward(self, obs, state=None, info={}):
+            
+        v,_ = self.net(obs['obs'])
 
-        if isinstance(batch, dict) and 'obs' in batch:
-            # If 'batch' is a dictionary and contains 'obs', extract it
-            state = batch['obs']
-        else:
-            # If 'batch' is a tensor, use it directly
-            state = batch
-
-        print("Input shape:", state.shape)
-
-        if self.is_gpu:
-            state = state.cuda()
-
-        v, _ = self.net(state)
-        print("Forwarding", v)
-
-        return Batch(obs=v.obs, state=state), None
+        return v
 
 
 actor = Actor(is_gpu=is_gpu_default)
@@ -180,7 +140,7 @@ if lr_decay:
 else:
     lr_scheduler = None
 
-policy = ts.policy.PPOPolicy(actor, critic, optim, dist,
+policy = ts.policy.PPOPolicy(actor, critic, optim, dist_fn = dist,
                              discount_factor=gamma, max_grad_norm=max_grad_norm,
                              eps_clip=eps_clip, vf_coef=vf_coef,
                              ent_coef=ent_coef, reward_normalization=rew_norm,
@@ -208,38 +168,16 @@ for wi in range(100, 0 - 1, -2):
     test_envs = DummyVectorEnv(
         [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(test_num)])
     buffer = ts.data.VectorReplayBuffer(buffer_size, train_num)
-    def preprocess_fn(**kwargs):
-        obs = kwargs.get("obs", np.array([[]]))
-        reward = kwargs.get("reward", 0)
-        done = kwargs.get("done", {})
-        truncated = kwargs.get("truncated", {})
-        info = kwargs.get("info", {})
-        env_id = kwargs.get("env_id", "default_value")
-        # Convert obs to a PyTorch tensor
-        obs = torch.tensor(obs, dtype=torch.float32)
-        batch = Batch(
-            obs=obs,  # Make sure to use the 'obs' attribute
-            reward=torch.tensor(reward, dtype=torch.float32),
-            done=done,
-            info=info,
-            truncated=truncated,
-            env_id=env_id,
-        )
-        print (batch)
-        # Assuming a normal environment step
-        return batch
 
-
-    # Initialize Collector with preprocess_fn
     train_collector = ts.data.Collector(
         policy=policy,
         env=train_envs,
         buffer=buffer,
-        preprocess_fn=preprocess_fn,
     )
 
     test_collector = ts.data.Collector(policy, test_envs)
-    train_collector.collect(n_episode=train_num)
+    batch = train_collector.collect(n_episode=train_num)
+    print(batch)
 
     def save_best_fn(policy):
         pass
@@ -268,7 +206,7 @@ for wi in range(100, 0 - 1, -2):
         train_fn=train_fn,
         test_fn=test_fn,
         save_best_fn=save_best_fn,
-        stop_fn=None,  # You may need to define your own stop function if needed
+        stop_fn=None,
         save_checkpoint_fn=save_best_fn,
         reward_metric=reward_metric,
         logger=logger,

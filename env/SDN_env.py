@@ -166,9 +166,20 @@ class SDN_Env(gym.Env):
 
         # Print the size of the state (ra)
         # print(f"Size of State (ra): {self.get_obs().shape}")
-
+        state = self.get_obs()
         # Return the initial observation and an empty info dictionary
-        return self.get_obs(), {}
+        data = {
+            'obs': state,
+            'act': {self.action},  # Make 'act' iterable by wrapping it in a list
+            'rew': {},  # Make 'rew' iterable by wrapping it in a list
+            'terminated': {},
+            'truncated': {},
+            'done': {},
+            'obs_next': state,
+            'info': {},
+            'policy': {},
+        }
+        return data
 
                
     def step(self, actions):
@@ -392,7 +403,15 @@ class SDN_Env(gym.Env):
         # Additional information (Thông tin bổ sung)
         info = {}
         truncated = {}
-        return obs, reward, done, truncated, info
+        data = {
+            'obs_next': obs, # The next observation
+            'rew': reward,          # The reward
+            'terminated': done,     # Whether the episode is terminated
+            'truncated': truncated, # Whether the episode was truncated
+            'done': done,           # Whether the episode is done
+            'info': info,           # Additional information 
+        }
+        return data
     
     def generate_task(self):
     #####################################################
