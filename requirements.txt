@@ -1,4 +1,5 @@
 tianshou==0.5.1
-gym==0.18.0
+gymnasium==0.29.1
 torch==2.1.2
+
 

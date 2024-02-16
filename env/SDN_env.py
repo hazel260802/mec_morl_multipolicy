@@ -179,7 +179,7 @@ class SDN_Env(gym.Env):
             'info': {},
             'policy': {},
         }
-        return data
+        return state, {}
 
                
     def step(self, actions):
@@ -401,7 +401,7 @@ class SDN_Env(gym.Env):
         print(f"Size of Reward: {reward}")
         #####################################################
         # Additional information (Thông tin bổ sung)
-        info = {}
+        info = {"env_id": 0}  # Assuming 0 is the correct environment ID
         truncated = {}
         data = {
             'obs_next': obs, # The next observation
@@ -411,6 +411,7 @@ class SDN_Env(gym.Env):
             'done': done,           # Whether the episode is done
             'info': info,           # Additional information 
         }
+        print('Data', data)
         return data
     
     def generate_task(self):

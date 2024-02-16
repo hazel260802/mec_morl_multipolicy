@@ -1,5 +1,5 @@
 import gymnasium as gym
-from tianshou.data.batch import Batch
+
 import torch
 import numpy as np
 import torch.nn as nn
@@ -65,6 +65,8 @@ class sdn_net(nn.Module):
         print('load model!')
 
     def save_model(self, filename):
+        directory = os.path.dirname(filename)
+        os.makedirs(directory, exist_ok=True)
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
@@ -92,10 +94,12 @@ class Actor(nn.Module):
         print('load model!')
 
     def save_model(self, filename):
+        directory = os.path.dirname(filename)
+        os.makedirs(directory, exist_ok=True)
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        logits,_ = self.net(obs['obs'])
+        logits,_ = self.net(obs)
         logits = F.softmax(logits, dim=-1)
 
         return logits, state
@@ -115,11 +119,13 @@ class Critic(nn.Module):
         print('load model!')
 
     def save_model(self, filename):
+        directory = os.path.dirname(filename)
+        os.makedirs(directory, exist_ok=True)
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
             
-        v,_ = self.net(obs['obs'])
+        v,_ = self.net(obs)
 
         return v
 
@@ -176,13 +182,12 @@ for wi in range(100, 0 - 1, -2):
     )
 
     test_collector = ts.data.Collector(policy, test_envs)
-    batch = train_collector.collect(n_episode=train_num)
-    print(batch)
+    train_collector.collect(n_episode=train_num)
 
     def save_best_fn(policy):
         pass
 
-    def test_fn(epoch, env_step, cloud_num):
+    def test_fn(epoch, env_step):
         policy.actor.save_model('save/pth-e%d/' % (edge_num) + 'cloud%d/' % (cloud_num) + expn + '/w%03d/ep%02d-actor.pth' % (wi, epoch))
         policy.critic.save_model('save/pth-e%d/' % (edge_num) + 'cloud%d/' % (cloud_num) + expn + '/w%03d/ep%02d-critic.pth' % (wi, epoch))
 
