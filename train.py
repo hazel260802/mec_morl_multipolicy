@@ -1,4 +1,4 @@
-import gymnasium as gym
+import gym as gym
 
 import torch
 import numpy as np
@@ -137,7 +137,7 @@ optim = torch.optim.Adam(actor_critic.parameters(), lr=lr)
 
 dist = torch.distributions.Categorical
 
-action_space = gym.spaces.Discrete(edge_num+cloud_num)
+action_space = gym.spaces.MultiDiscrete([edge_num + 1, cloud_num] * cloud_num)
 
 if lr_decay:
     lr_scheduler = LambdaLR(

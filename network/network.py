@@ -3,7 +3,7 @@
 
 
 
-import gymnasium as gym, torch, numpy as np, torch.nn as nn
+import gym, torch, numpy as np, torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 from tianshou.env import DummyVectorEnv
 import torch.nn.functional as F

@@ -1,5 +1,4 @@
-tianshou==0.5.1
-gymnasium==0.29.1
-torch==2.1.2
-
+gym~=0.26.2
+tianshou~=0.4.10
+pettingzoo
 
