@@ -137,8 +137,7 @@ optim = torch.optim.Adam(actor_critic.parameters(), lr=lr)
 
 dist = torch.distributions.Categorical
 
-action_space = gym.spaces.MultiDiscrete([edge_num + 1, cloud_num] * cloud_num)
-
+action_space = gym.spaces.MultiDiscrete([cloud_num, edge_num])
 if lr_decay:
     lr_scheduler = LambdaLR(
         optim, lr_lambda=lambda epoch: lr_decay ** (epoch - 1)
