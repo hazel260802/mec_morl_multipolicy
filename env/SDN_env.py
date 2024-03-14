@@ -1,4 +1,6 @@
 # import gymnasium as gym
+import gym
+from gym import spaces
 from copy import deepcopy
 import numpy as np
 import json
@@ -72,10 +74,15 @@ class SDN_Env():
         
         # Weight parameter
         self.w = w
-        # # Observation space parameters
-        # observation_space_shape = 6 * self.cloud_num_H + 6 * self.edge_num_H
-        # self.observation_space = spaces.Box(low=0, high=1, shape=(observation_space_shape,), dtype=np.float32)
+        # Observation space parameters
+        observation_space_shape = 6 * self.cloud_num_H + 6 * self.edge_num_H
+        self.observation_space = spaces.Box(low=0, high=1, shape=(observation_space_shape,), dtype=np.float32)
 
+        # Calculate the total number of actions based on the number of edge and cloud servers
+        self.edge_num = np.random.randint(self.edge_num_L, self.edge_num_H + 1) if not edge_num else edge_num
+        self.cloud_num = np.random.randint(self.cloud_num_L, self.cloud_num_H + 1) if not cloud_num else cloud_num
+        self.action_space = spaces.Discrete(self.edge_num + self.cloud_num)
+        print(f"Action Space: {self.action_space}")
         # Initialize the environment
         self.reset()  
 
