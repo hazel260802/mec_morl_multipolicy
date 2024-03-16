@@ -33,7 +33,7 @@ python train.py
 
 ### Acknowledgements
 
-This research was supported by [Organization/Grant Name] under Grant No. [Grant Number].
+This research was supported by BKCS Labs under Hanoi University of Science and Technology.
 
 ### License
 
