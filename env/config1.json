@@ -43,6 +43,8 @@
     "task_size_H": 100e6,
     "edge_num_L": 1,
     "edge_num_H": 10,
+    "cloud_num_L": 1,
+    "cloud_num_H": 10,
     "cloud_cpu_freq": [4e9],
     "edge_cpu_freq": [2e9],
     "cloud_cpu_freq_peak": 1e9,
