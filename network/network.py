@@ -160,13 +160,13 @@ class conv_mlp_net(nn.Module):
     def forward(self, obs):
 
         x = self.feature_network_A(obs)
-        print("Shape after conv_resblock:", x.shape)
+        # print("Shape after conv_resblock:", x.shape)
 
         x = x.view(-1, self.mlp_in)
-        print("Shape after view:", x.shape)
+        # print("Shape after view:", x.shape)
 
         x = self.feature_network_B(x)
-        print("Shape after mlp_resblock:", x.shape)
+        # print("Shape after mlp_resblock:", x.shape)
         
         return x
     

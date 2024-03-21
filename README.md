@@ -16,7 +16,7 @@ To train the MEC-MORL model, follow these steps:
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/mec_morl_multipolicy.git
+git clone https://github.com/hazel260802/mec_morl_multipolicy.git
 ```
 
 2. Install the required dependencies:

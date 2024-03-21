@@ -71,12 +71,12 @@ class sdn_net(nn.Module):
 
     def forward(self, obs, state=None, info={}):
         state = torch.tensor(obs).float()
-        print("Input shape:", state.shape)
+        # print("Input shape:", state.shape)
         if self.is_gpu:
             state = state.cuda()
 
         logits = self.network(state)
-        print("Output shape:", logits)
+        # print("Output shape:", logits)
 
         return logits, state
 

@@ -10,4 +10,5 @@ def select_action_ucb(Q, N, state, t):
         else:
             q = Q[state, a]
             ucb_values[a] = q + 2 * math.log(t) / N[state, a]
-    return np.argmax(ucb_values)
+    action = np.argmax(ucb_values)
+    return min(action, num_actions - 1)  # Ensure action is within the valid range
