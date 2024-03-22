@@ -576,3 +576,37 @@ class SDN_Env():
     def render(self, mode='human'):
         # Implement rendering logic if needed
         pass
+    
+    # Estimate the total delay and average delay per Mbits task
+    def estimate_performance(self):
+        total_delay = 0
+        total_task_size = 0
+        total_link_utilisation = 0
+        total_tasks = 0
+        average_delay_per_Mbits_task = 0
+        average_lu_per_Mbits_task = 0
+
+        # Calculate total task delay and total task size
+        for edge_exe_list in self.edge_exe_lists:
+            for task in edge_exe_list:
+                total_delay += task['off_time'] + task['exe_time']
+                total_link_utilisation += task['off_link_utilisation'] + task['exe_link_utilisation']
+                total_task_size += task['size']
+                total_tasks += 1
+        
+        for cloud_exe_list in self.cloud_exe_lists:
+            for task in cloud_exe_list:
+                total_delay += task['off_time'] + task['exe_time']
+                total_link_utilisation += task['off_link_utilisation'] + task['exe_link_utilisation']
+                total_task_size += task['size']
+                total_tasks += 1
+
+        # Calculate the average delay per Mbits task
+        if total_tasks > 0:
+            average_delay_per_Mbits_task = total_delay / (self.task_size_exp_theta * total_tasks)
+            average_lu__per_Mbits_task  = total_link_utilisation / (self.task_size_exp_theta * total_tasks)
+        else:
+            average_delay_per_Mbits_task = 0
+            average_lu_per_Mbits_task = 0 
+        
+        return average_delay_per_Mbits_task, average_lu_per_Mbits_task

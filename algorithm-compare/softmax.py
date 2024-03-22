@@ -18,16 +18,21 @@ def run_softmax(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, tau
     - tau: The temperature parameter for the softmax function (default is 0.1).
 
     Returns:
-    - rewards: A list containing the total rewards obtained in each episode.
+    - avg_delays: A list containing the average delay per task for each episode.
+    - avg_link_utilisations: A list containing the average link utilisation per task for each episode.
     """
     num_states = observation_space.shape[0]  # Number of states in the observation space
     num_actions = env.action_space.n  # Number of actions in the environment's action space
     Q = np.zeros((num_states, num_actions))  # Initialize the action-value function Q
 
-    rewards = []  # List to store the total rewards obtained in each episode
+    avg_delays = []  # List to store average delay per task for each episode
+    avg_link_utilisations = []  # List to store average link utilisation per task for each episode
+    
     for _ in range(num_episodes):
         state = env.reset()  # Reset the environment and get the initial state
-        total_reward = 0  # Initialize the total reward for the episode
+        total_delay = 0  # Initialize total delay for this episode
+        total_link_utilisation = 0  # Initialize total link utilisation for this episode
+        total_tasks = 0  # Initialize total number of tasks for this episode
         done = False  # Initialize the done flag for the episode
         
         # Run the episode until termination
@@ -43,10 +48,9 @@ def run_softmax(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, tau
             action = np.random.choice(num_actions, p=final_probabilities)
             
             # Take a step in the environment based on the selected action
-            next_state, reward, done, _ = env.step(action)
+            next_state, _, done, _ = env.step(action)
             
-            # Update the total reward
-            total_reward += reward
+            # Transition to the next state
             
             # Update the action-value function Q using the softmax policy gradient update
             if state.shape[0] < num_states and action < num_actions:
@@ -55,7 +59,10 @@ def run_softmax(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, tau
             # Transition to the next state
             state = next_state
         
-        # Append the total reward obtained in the episode to the rewards list
-        rewards.append(total_reward)
+        # Calculate average delay and link utilisation for this episode
+        avg_delay, avg_link_utilisation = env.estimate_performance()
+        
+        avg_delays.append(avg_delay)  # Append the average delay per task for this episode to the list
+        avg_link_utilisations.append(avg_link_utilisation)  # Append the average link utilisation per task for this episode to the list
     
-    return rewards
+    return avg_delays, avg_link_utilisations

@@ -21,20 +21,29 @@ def main():
     
     observation_space = env.get_obs()
     # Run ε-Greedy algorithm
-    egreedy_rewards = run_egreedy(env, observation_space, num_episodes=num_episodes)
+    egreedy_delays, egreedy_link_utilisations = run_egreedy(env, observation_space, num_episodes=num_episodes)
 
     # Run Softmax algorithm
-    softmax_rewards = run_softmax(env, observation_space, num_episodes=num_episodes)
+    softmax_delays, softmax_link_utilisations = run_softmax(env, observation_space, num_episodes=num_episodes)
 
     # Run UCB1 algorithm
-    ucb_rewards = run_ucb1(env, observation_space, num_episodes=num_episodes)
+    ucb_delays, ucb_link_utilisations = run_ucb1(env, observation_space, num_episodes=num_episodes)
+    
     # Plotting the results
-    plt.plot(np.arange(num_episodes), egreedy_rewards, label='ε-Greedy')
-    plt.plot(np.arange(num_episodes), softmax_rewards, label='Softmax')
-    plt.plot(np.arange(num_episodes), ucb_rewards, label='UCB1')
-    plt.xlabel('Episode')
-    plt.ylabel('Average Total Reward')
-    plt.title('Comparison of ε-Greedy, Softmax, and UCB1 Algorithms')
+    plt.figure(figsize=(10, 5))
+
+    # Plot ε-Greedy
+    plt.plot(egreedy_delays, egreedy_link_utilisations, label='ε-Greedy')
+
+    # Plot Softmax
+    plt.plot(softmax_delays, softmax_link_utilisations, label='Softmax')
+
+    # Plot UCB1
+    plt.plot(ucb_delays, ucb_link_utilisations, label='UCB1')
+
+    plt.xlabel('Task Delay (Minute)')
+    plt.ylabel('Link Utilisation')
+    plt.title('Comparison of Task Delay and Link Utilisation for ε-Greedy, Softmax, and UCB1 Algorithms')
     plt.legend()
     plt.grid(True)
     plt.show()
