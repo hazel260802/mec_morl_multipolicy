@@ -120,7 +120,7 @@ class SDN_Env():
         if self.cloud_n:
             self.cloud_num = self.cloud_n
         # Set the action space size based on the number of edge servers
-        self.action_space = self.edge_num + self.cloud_num
+        self.action_space = spaces.Discrete(self.edge_num + self.cloud_num)
 
         # Initialize cloud_off_datarate and edge_off_datarate with random data rates
         self.cloud_off_datarate = np.random.uniform(10e6, 100e6, size=(self.cloud_num, self.user_num))
@@ -187,7 +187,7 @@ class SDN_Env():
         edge_action = None
         cloud_action = None
         self.action = actions
-        print('Actions:', actions)
+        # print('Actions:', actions)
         
         if self.arrive_flag:
             self.arrive_flag = False
@@ -253,7 +253,7 @@ class SDN_Env():
             while (used_time < self.dt):
                 off_estimate_time = []
                 exe_estimate_time = []
-                print(f"Edge off lists: {self.edge_off_lists}")
+                # print(f"Edge off lists: {self.edge_off_lists}")
                 task_off_num = len(self.edge_off_lists[n])
                 task_exe_num = len(self.edge_exe_lists[n])
                 # Estimate offloading time (Ước lượng thời gian giải nhiệm)
@@ -305,7 +305,7 @@ class SDN_Env():
                         self.LC[n] * self.dt
                     )                    
                     self.edge_exe_lists[n][i]['exe_time'] += run_time
-                    print("Edge exe list",self.edge_exe_lists[n][i]['remain'])
+                    # print("Edge exe list",self.edge_exe_lists[n][i]['remain'])
                     if self.edge_exe_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
                 pt = 0
@@ -325,7 +325,7 @@ class SDN_Env():
             while (used_time < self.dt):
                 off_estimate_time = []
                 exe_estimate_time = []
-                print(f"Cloud off lists: {self.cloud_off_lists}")
+                # print(f"Cloud off lists: {self.cloud_off_lists}")
                 task_off_num = len(self.cloud_off_lists[n])
                 task_exe_num = len(self.cloud_exe_lists[n])
                 # Estimate offloading time (Ước lượng thời gian giải nhiệm)
@@ -377,7 +377,7 @@ class SDN_Env():
                         self.LC[n] * self.dt
                     )                    
                     self.cloud_exe_lists[n][i]['exe_time'] += run_time
-                    print("cloud exe list",self.cloud_exe_lists[n][i]['remain'])
+                    # print("cloud exe list",self.cloud_exe_lists[n][i]['remain'])
                     if self.cloud_exe_lists[n][i]['remain'] <= ZERO_RES:
                         retain_flag_exe[i] = False
                 pt = 0

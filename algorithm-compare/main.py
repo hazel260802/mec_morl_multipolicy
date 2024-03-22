@@ -18,9 +18,10 @@ def main():
     env = SDN_Env(conf_file='../env/config1.json', conf_name=config, w=1.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)
     # Set hyperparameters
     num_episodes = 1000  
-
+    
+    observation_space = env.get_obs()
     # Run ε-Greedy algorithm
-    egreedy_rewards = run_egreedy(env, num_episodes=num_episodes)
+    egreedy_rewards = run_egreedy(env, observation_space, num_episodes=num_episodes)
 
     # Run Softmax algorithm
     softmax_rewards = run_softmax(env, num_episodes=num_episodes)
