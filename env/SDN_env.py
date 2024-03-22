@@ -604,7 +604,7 @@ class SDN_Env():
         # Calculate the average delay per Mbits task
         if total_tasks > 0:
             average_delay_per_Mbits_task = total_delay / (self.task_size_exp_theta * total_tasks)
-            average_lu__per_Mbits_task  = total_link_utilisation / (self.task_size_exp_theta * total_tasks)
+            average_lu_per_Mbits_task  = total_link_utilisation / (self.task_size_exp_theta * total_tasks)
         else:
             average_delay_per_Mbits_task = 0
             average_lu_per_Mbits_task = 0 
