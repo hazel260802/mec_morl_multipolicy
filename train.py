@@ -101,7 +101,6 @@ class Actor(nn.Module):
     def forward(self, obs, state=None, info={}):
         logits,_ = self.net(obs)
         logits = F.softmax(logits, dim=-1)
-
         return logits, state
 
 class Critic(nn.Module):
