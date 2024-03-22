@@ -54,7 +54,7 @@ def run_ucb1(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, c=2):
                 max_action = ucb1(Q[state.astype(int)], N[state.astype(int)], t, c)  # Select action using UCB1
                 if max_action in range(num_actions):
                             action = max_action
-            next_state, _, done, _ = env.step(action)  # Take a step in the environment
+            next_state, reward, done, _ = env.step(action)  # Take a step in the environment
             # Update action-value estimates and visit counts using Q-learning update rule
             if state.shape[0] in range(num_states) and action in range(num_actions):
                 N[state.astype(int), action] += 1

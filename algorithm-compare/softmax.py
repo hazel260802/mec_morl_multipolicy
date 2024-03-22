@@ -48,7 +48,7 @@ def run_softmax(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, tau
             action = np.random.choice(num_actions, p=final_probabilities)
             
             # Take a step in the environment based on the selected action
-            next_state, _, done, _ = env.step(action)
+            next_state, reward, done, _ = env.step(action)
             
             # Transition to the next state
             
@@ -64,5 +64,4 @@ def run_softmax(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, tau
         
         avg_delays.append(avg_delay)  # Append the average delay per task for this episode to the list
         avg_link_utilisations.append(avg_link_utilisation)  # Append the average link utilisation per task for this episode to the list
-    
     return avg_delays, avg_link_utilisations

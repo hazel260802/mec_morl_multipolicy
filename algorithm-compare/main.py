@@ -35,13 +35,13 @@ def main():
     # Plot ε-Greedy
     plt.plot(egreedy_delays, egreedy_link_utilisations, label='ε-Greedy')
 
-    # Plot Softmax
-    plt.plot(softmax_delays, softmax_link_utilisations, label='Softmax')
+    # # Plot Softmax
+    # plt.plot(softmax_delays, softmax_link_utilisations, label='Softmax')
 
-    # Plot UCB1
-    plt.plot(ucb_delays, ucb_link_utilisations, label='UCB1')
+    # # Plot UCB1
+    # plt.plot(ucb_delays, ucb_link_utilisations, label='UCB1')
 
-    plt.xlabel('Task Delay (Minute)')
+    plt.xlabel('Task Delay')
     plt.ylabel('Link Utilisation')
     plt.title('Comparison of Task Delay and Link Utilisation for ε-Greedy, Softmax, and UCB1 Algorithms')
     plt.legend()
