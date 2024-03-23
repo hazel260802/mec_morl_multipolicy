@@ -219,7 +219,7 @@ class SDN_Env():
                 off_link_utilisation = the_task['size']/ (
                         self.edge_off_band_width[e] * self.dt)
                 the_task['off_link_utilisation'] = off_link_utilisation
-                the_task['exe_link_utilisation'] = the_task['size']*self.LC[self.task_user_id, e] / (self.edge_off_band_width[e] * self.dt)
+                the_task['exe_link_utilisation'] = the_task['size']/ (self.LC[self.task_user_id, e] * self.dt)
                 self.step_link_utilisation = the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
                 self.edge_off_lists[e].append(the_task)
             else:
@@ -233,7 +233,7 @@ class SDN_Env():
                 off_link_utilisation = the_task['size']/ (
                         self.cloud_off_band_width[c] * self.dt)
                 the_task['off_link_utilisation'] = off_link_utilisation
-                the_task['exe_link_utilisation'] = the_task['size']*self.LC[self.task_user_id, c] / (self.cloud_off_band_width[c] * self.dt)
+                the_task['exe_link_utilisation'] = the_task['size'] / (self.LC[self.task_user_id, c] * self.dt)
                 self.step_link_utilisation = the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
                 self.cloud_off_lists[c].append(the_task)
             else:
@@ -301,7 +301,7 @@ class SDN_Env():
                 retain_flag_exe = np.ones(task_exe_num, dtype=np.bool_)
                 for i in range(task_exe_num):
                     self.edge_exe_lists[n][i]['remain'] -= edge_exe_size
-                    self.edge_exe_lists[n][i]['exe_link_utilisation'] += (edge_exe_size * self.edge_exe_lists[n][i]['exe_link_utilisation']) / (
+                    self.edge_exe_lists[n][i]['exe_link_utilisation'] += (edge_exe_size) / (
                         self.LC[n] * self.dt
                     )                    
                     self.edge_exe_lists[n][i]['exe_time'] += run_time
@@ -373,7 +373,7 @@ class SDN_Env():
                 retain_flag_exe = np.ones(task_exe_num, dtype=np.bool_)
                 for i in range(task_exe_num):
                     self.cloud_exe_lists[n][i]['remain'] -= cloud_exe_size
-                    self.cloud_exe_lists[n][i]['exe_link_utilisation'] += (cloud_exe_size * self.cloud_exe_lists[n][i]['exe_link_utilisation']) / (
+                    self.cloud_exe_lists[n][i]['exe_link_utilisation'] += (cloud_exe_size) / (
                         self.LC[n] * self.dt
                     )                    
                     self.cloud_exe_lists[n][i]['exe_time'] += run_time
@@ -603,8 +603,8 @@ class SDN_Env():
 
         # Calculate the average delay per Mbits task
         if total_tasks > 0:
-            average_delay_per_Mbits_task = total_delay / (self.task_size_exp_theta * total_tasks)
-            average_lu_per_Mbits_task  = total_link_utilisation / (self.task_size_exp_theta * total_tasks)
+            average_delay_per_Mbits_task = total_delay 
+            average_lu_per_Mbits_task  = total_link_utilisation 
         else:
             average_delay_per_Mbits_task = 0
             average_lu_per_Mbits_task = 0    

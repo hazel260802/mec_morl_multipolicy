@@ -182,7 +182,7 @@ for wi in range(100, 0 - 1, -2):
     test_collector = ts.data.Collector(policy, test_envs)
     train_collector.collect(n_episode=train_num)
 
-    def save_best_fn(policy):
+    def save_best_fn(policy, epoch, env_step, gradient_step):
         pass
 
     def test_fn(epoch, env_step):
@@ -208,9 +208,9 @@ for wi in range(100, 0 - 1, -2):
         episode_per_collect=episode_per_collect,
         train_fn=train_fn,
         test_fn=test_fn,
-        save_best_fn=save_best_fn,
+        save_best_fn=save_best_fn(policy, epoch, 0, 0),
         stop_fn=None,
-        save_checkpoint_fn=save_best_fn,
+        save_checkpoint_fn=save_best_fn(policy, epoch, 0, 0),
         reward_metric=reward_metric,
         logger=logger,
     )

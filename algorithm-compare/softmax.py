@@ -64,4 +64,6 @@ def run_softmax(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, tau
         
         avg_delays.append(avg_delay)  # Append the average delay per task for this episode to the list
         avg_link_utilisations.append(avg_link_utilisation)  # Append the average link utilisation per task for this episode to the list
+    print("Average delay per task for each episode:", avg_delays)
+    print("Average link utilisation per task for each episode:", avg_link_utilisations)
     return avg_delays, avg_link_utilisations

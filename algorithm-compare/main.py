@@ -22,34 +22,43 @@ def main():
     observation_space = env.get_obs()
     # Run ε-Greedy algorithm
     egreedy_delays, egreedy_link_utilisations = run_egreedy(env, observation_space, num_episodes=num_episodes)
+    # Tính toán giá trị trung bình trên mỗi phút
+    egreedy_delays_avg = [np.mean(egreedy_delays[i:i+100]) for i in range(0, len(egreedy_delays), 100)]
+    egreedy_link_utilisations_avg = [np.mean(egreedy_link_utilisations[i:i+100]) for i in range(0, len(egreedy_link_utilisations), 100)]
 
     # Run Softmax algorithm
     softmax_delays, softmax_link_utilisations = run_softmax(env, observation_space, num_episodes=num_episodes)
+    # Tính toán giá trị trung bình trên mỗi phút
+    softmax_delays_avg = [np.mean(softmax_delays[i:i+100]) for i in range(0, len(softmax_delays), 100)]
+    softmax_link_utilisations_avg = [np.mean(softmax_link_utilisations[i:i+100]) for i in range(0, len(softmax_link_utilisations), 100)]
 
     # Run UCB1 algorithm
     ucb_delays, ucb_link_utilisations = run_ucb1(env, observation_space, num_episodes=num_episodes)
+    # Tính toán giá trị trung bình trên mỗi phút
+    ucb_delays_avg = [np.mean(ucb_delays[i:i+100]) for i in range(0, len(ucb_delays), 100)]
+    ucb_link_utilisations_avg = [np.mean(ucb_link_utilisations[i:i+100]) for i in range(0, len(ucb_link_utilisations), 100)]
     
-    # Run PPO algorithm
-    ave_delay_filename = '../result/ave_delay_per_episode.json'
-    ave_link_util_filename = '../result/ave_link_util_per_episode.json'
+    # # Run PPO algorithm
+    # ave_delay_filename = '../result/ave_delay_per_episode.json'
+    # ave_link_util_filename = '../result/ave_link_util_per_episode.json'
 
-    # Đọc dữ liệu từ các tệp tin JSON
-    ppo_delays = load_results_from_json(ave_delay_filename)
-    ppo_link_utilisations = load_results_from_json(ave_link_util_filename)
+    # # Đọc dữ liệu từ các tệp tin JSON
+    # ppo_delays = load_results_from_json(ave_delay_filename)
+    # ppo_link_utilisations = load_results_from_json(ave_link_util_filename)
     # Plotting the results
     plt.figure(figsize=(10, 5))
 
     # Plot ε-Greedy
-    plt.plot(egreedy_delays, egreedy_link_utilisations, label='ε-Greedy')
+    plt.plot(egreedy_delays_avg, egreedy_link_utilisations_avg, label='ε-Greedy')
 
     # Plot Softmax
-    plt.plot(softmax_delays, softmax_link_utilisations, label='Softmax')
+    plt.plot(softmax_delays_avg, softmax_link_utilisations_avg, label='Softmax')
 
     # Plot UCB1
-    plt.plot(ucb_delays, ucb_link_utilisations, label='UCB1')
+    plt.plot(ucb_delays_avg, ucb_link_utilisations_avg, label='UCB1')
 
     # Plot PPO
-    plt.plot(ppo_delays, ppo_link_utilisations, label='PPO')
+    # plt.plot(ppo_delays, ppo_link_utilisations, label='PPO')
     plt.xlabel('Task Delay')
     plt.ylabel('Link Utilisation')
     plt.title('Comparison of Task Delay and Link Utilisation for ε-Greedy, Softmax, and UCB1 Algorithms')
