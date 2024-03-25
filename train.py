@@ -133,6 +133,10 @@ actor = Actor(is_gpu=is_gpu_default)
 critic = Critic(is_gpu=is_gpu_default)
 actor_critic = ts.utils.net.common.ActorCritic(actor, critic)
 optim = torch.optim.Adam(actor_critic.parameters(), lr=lr)
+# Khởi tạo mô hình chưa được huấn luyện
+untrained_actor = deepcopy(actor)
+untrained_critic = deepcopy(critic)
+untrained_actor_critic = ts.utils.net.common.ActorCritic(untrained_actor, untrained_critic)
 
 dist = torch.distributions.Categorical
 
@@ -219,9 +223,13 @@ for wi in range(100, 0 - 1, -2):
     ave_link_util_per_episode = []  # Danh sách lưu trữ trung bình sử dụng băng thông của liên kết cho mỗi episode
 
     # Tính toán trung bình độ trễ và trung bình sử dụng băng thông của liên kết cho mỗi episode
-    ave_delay, ave_link_util = policy.actor_critic.env.estimate_performance()
-    ave_delay_per_episode.append(ave_delay)
-    ave_link_util_per_episode.append(ave_link_util)
+    # Access the environment directly
+    env = train_envs.get_env(0)  # Assuming the environment is the first in the list
+    ave_delay, ave_link_util = env.estimate_performance()
+
+    # ave_delay, ave_link_util = policy._actor_critic.state_dict()['env'].estimate_performance()
+    # ave_delay_per_episode.append(ave_delay)
+    # ave_link_util_per_episode.append(ave_link_util)
     # Lưu thông tin về trung bình độ trễ và trung bình sử dụng băng thông của liên kết cho mỗi episode vào tệp tin JSON
     with open('result/ave_delay_per_episode.json', 'w') as f:
         json.dump(ave_delay_per_episode, f)
@@ -229,10 +237,6 @@ for wi in range(100, 0 - 1, -2):
     with open('result/ave_link_util_per_episode.json', 'w') as f:
         json.dump(ave_link_util_per_episode, f)
     
-    # Khởi tạo mô hình chưa được huấn luyện
-    untrained_actor = deepcopy(actor)
-    untrained_critic = deepcopy(critic)
-    untrained_actor_critic = ts.utils.net.common.ActorCritic(untrained_actor, untrained_critic)
 
     # Khởi tạo môi trường và thu thập dữ liệu cho mô hình chưa được huấn luyện
     untrained_test_envs = DummyVectorEnv(
@@ -252,7 +256,8 @@ for wi in range(100, 0 - 1, -2):
         # Thực hiện hành động bằng cách sử dụng chính sách chưa được huấn luyện và thu thập dữ liệu
         untrained_collector.collect(n_episode=1)
         # Tính toán trung bình độ trễ và trung bình sử dụng băng thông của liên kết cho mỗi tập tin JSON
-        untrained_ave_delay, untrained_ave_link_util = untrained_actor_critic.env.estimate_performance()
+        env = untrained_test_envs.get_env(0)  # Assuming the environment is the first in the list
+        untrained_ave_delay, untrained_ave_link_util = env.estimate_performance()
         untrained_ave_delay_per_episode.append(untrained_ave_delay)
         untrained_ave_link_util_per_episode.append(untrained_ave_link_util)
 

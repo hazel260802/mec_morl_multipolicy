@@ -23,20 +23,20 @@ def main():
     # Run ε-Greedy algorithm
     egreedy_delays, egreedy_link_utilisations = run_egreedy(env, observation_space, num_episodes=num_episodes)
     # Tính toán giá trị trung bình trên mỗi phút
-    egreedy_delays_avg = [np.mean(egreedy_delays[i:i+100]) for i in range(0, len(egreedy_delays), 100)]
-    egreedy_link_utilisations_avg = [np.mean(egreedy_link_utilisations[i:i+100]) for i in range(0, len(egreedy_link_utilisations), 100)]
+    egreedy_delays_avg = [np.mean(egreedy_delays[i:i+200]) for i in range(0, len(egreedy_delays), 200)]
+    egreedy_link_utilisations_avg = [np.mean(egreedy_link_utilisations[i:i+200]) for i in range(0, len(egreedy_link_utilisations), 200)]
 
     # Run Softmax algorithm
     softmax_delays, softmax_link_utilisations = run_softmax(env, observation_space, num_episodes=num_episodes)
     # Tính toán giá trị trung bình trên mỗi phút
-    softmax_delays_avg = [np.mean(softmax_delays[i:i+100]) for i in range(0, len(softmax_delays), 100)]
-    softmax_link_utilisations_avg = [np.mean(softmax_link_utilisations[i:i+100]) for i in range(0, len(softmax_link_utilisations), 100)]
+    softmax_delays_avg = [np.mean(softmax_delays[i:i+200]) for i in range(0, len(softmax_delays), 200)]
+    softmax_link_utilisations_avg = [np.mean(softmax_link_utilisations[i:i+200]) for i in range(0, len(softmax_link_utilisations), 200)]
 
     # Run UCB1 algorithm
     ucb_delays, ucb_link_utilisations = run_ucb1(env, observation_space, num_episodes=num_episodes)
     # Tính toán giá trị trung bình trên mỗi phút
-    ucb_delays_avg = [np.mean(ucb_delays[i:i+100]) for i in range(0, len(ucb_delays), 100)]
-    ucb_link_utilisations_avg = [np.mean(ucb_link_utilisations[i:i+100]) for i in range(0, len(ucb_link_utilisations), 100)]
+    ucb_delays_avg = [np.mean(ucb_delays[i:i+200]) for i in range(0, len(ucb_delays), 200)]
+    ucb_link_utilisations_avg = [np.mean(ucb_link_utilisations[i:i+200]) for i in range(0, len(ucb_link_utilisations), 200)]
     
     # # Run PPO algorithm
     # ave_delay_filename = '../result/ave_delay_per_episode.json'
@@ -48,6 +48,11 @@ def main():
     # Plotting the results
     plt.figure(figsize=(10, 5))
 
+    # Tạo mảng chứa giá trị của trục x tính theo phút
+    egreedy_delays_avg = [i * 20 for i in range(len(egreedy_delays_avg))]
+    softmax_delays_avg = [i * 20 for i in range(len(softmax_delays_avg))]
+    ucb_delays_avg = [i * 20 for i in range(len(ucb_delays_avg))]
+    
     # Plot ε-Greedy
     plt.plot(egreedy_delays_avg, egreedy_link_utilisations_avg, label='ε-Greedy')
 
