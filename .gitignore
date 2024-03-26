@@ -3,3 +3,4 @@ env/__pycache__/
 tensor-board-log
 env/log
 env/save
+env/tensor-board-log
