@@ -1,3 +1,10 @@
+import sys
+import os
+
+# Add the project directory to the Python path
+project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(project_dir)
+
 import gym
 import numpy as np
 import matplotlib.pyplot as plt
@@ -5,10 +12,12 @@ from egreedy import run_egreedy
 from softmax import run_softmax
 from ucb import run_ucb1
 from ppo import run_ppo
+from train import Actor, Critic, is_gpu_default, expn
 import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from env.SDN_env import SDN_Env
+
 
 config = 'multi-edge'
 cloud_num = 1
@@ -21,6 +30,7 @@ def main():
     num_episodes = 1000  
     
     observation_space = env.get_obs()
+    
     # Run ε-Greedy algorithm
     egreedy_delays, egreedy_link_utilisations = run_egreedy(env, observation_space, num_episodes=num_episodes)
     # Tính toán giá trị trung bình trên mỗi phút
@@ -39,18 +49,18 @@ def main():
     ucb_delays_avg = [np.mean(ucb_delays[i:i+200]) for i in range(0, len(ucb_delays), 200)]
     ucb_link_utilisations_avg = [np.mean(ucb_link_utilisations[i:i+200]) for i in range(0, len(ucb_link_utilisations), 200)]
     
-    # Run PPO algorithm
-    ppo_delays, ppo_link_utilisations = run_ppo(env, observation_space, num_episodes=num_episodes)
+    # Load PPO model for the last epoch
+    actor = Actor(is_gpu=is_gpu_default)
+    critic = Critic(is_gpu=is_gpu_default)
+    actor.load_model(f'save/pth-e{edge_num}/cloud{cloud_num}/{expn}/w000/ep10-actor.pth')  # Load the last epoch
+    critic.load_model(f'save/pth-e{edge_num}/cloud{cloud_num}/{expn}/w000/ep10-critic.pth')  # Load the last epoch
+
+    # Run PPO algorithm with loaded models
+    ppo_delays, ppo_link_utilisations = run_ppo(env, observation_space, num_episodes=num_episodes, actor=actor, critic=critic)
     # Tính toán giá trị trung bình trên mỗi phút
     ppo_delays_avg = [np.mean(ppo_delays[i:i+200]) for i in range(0, len(ppo_delays), 200)]
     ppo_link_utilisations_avg = [np.mean(ppo_link_utilisations[i:i+200]) for i in range(0, len(ppo_link_utilisations), 200)]
-    # ave_delay_filename = '../result/ave_delay_per_episode.json'
-    # ave_link_util_filename = '../result/ave_link_util_per_episode.json'
 
-    # # Đọc dữ liệu từ các tệp tin JSON
-    # ppo_delays = load_results_from_json(ave_delay_filename)
-    # ppo_link_utilisations = load_results_from_json(ave_link_util_filename)   
-    
     # Plotting the results
     plt.figure(figsize=(10, 5))
 
@@ -70,7 +80,7 @@ def main():
     plt.plot(ucb_delays_avg, ucb_link_utilisations_avg, label='UCB1')
 
     # Plot PPO
-    plt.plot(ppo_delays_avg, ppo_link_utilisations_avg, label='PPO')
+    plt.plot(ppo_delays_avg, ppo_link_utilisations_avg, label=f'PPO (Episode {ep})')
     plt.xlabel('Task Delay')
     plt.ylabel('Link Utilisation')
     plt.title('Comparison of Task Delay and Link Utilisation for ε-Greedy, Softmax, UCB1, and PPO Algorithms')
@@ -80,5 +90,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

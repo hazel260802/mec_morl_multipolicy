@@ -5,3 +5,5 @@ from . import egreedy
 from . import softmax
 from . import ucb
 from . import main
+from . import ppo
+from .ppo import *
