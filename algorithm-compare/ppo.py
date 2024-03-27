@@ -10,9 +10,6 @@ def run_ppo(env, observation_space, num_episodes=1000, actor=None, critic=None):
     
     for episode in range(num_episodes):
         obs = env.reset()
-        episode_delay = 0
-        episode_link_utilisation = 0
-
         done = False
         while not done:
             # Choose action using the actor model
@@ -21,11 +18,6 @@ def run_ppo(env, observation_space, num_episodes=1000, actor=None, critic=None):
 
             # Perform action and observe next state and reward
             next_obs, reward, done, info = env.step(action)
-
-            # Update delay and link utilization
-            episode_delay += info['delay']
-            episode_link_utilisation += info['link_utilization']
-
             # Update current observation
             obs = next_obs
 
@@ -35,5 +27,6 @@ def run_ppo(env, observation_space, num_episodes=1000, actor=None, critic=None):
         # Append to lists
         delays.append(avg_delay)
         link_utilisations.append(avg_link_utilisation)
-        
+    print("Average delay per task for each episode:", delays)
+    print("Average link utilisation per task for each episode:", link_utilisations) 
     return delays, link_utilisations

@@ -215,27 +215,4 @@ for wi in range(100, 0 - 1, -2):
         logger=logger,
     )
         
-    ave_delay_per_episode = []  # Danh sách lưu trữ trung bình độ trễ cho mỗi episode
-    ave_link_util_per_episode = []  # Danh sách lưu trữ trung bình sử dụng băng thông của liên kết cho mỗi episode
-
-    # Tính toán trung bình độ trễ và trung bình sử dụng băng thông của liên kết cho mỗi episode
-    # Access the environment directly
-    for env in train_envs.venv:
-    # Do something with each environment 'env'
-        ave_delay, ave_link_util = env.estimate_performance()
-
-    # ave_delay, ave_link_util = policy._actor_critic.state_dict()['env'].estimate_performance()
-    # ave_delay_per_episode.append(ave_delay)
-    # ave_link_util_per_episode.append(ave_link_util)
-    
-    # Kiểm tra xem thư mục "result" đã tồn tại chưa
-    if not os.path.exists('result'):
-        # Nếu chưa tồn tại, tạo mới
-        os.makedirs('result')
-
-    # Lưu thông tin về trung bình độ trễ và trung bình sử dụng băng thông của liên kết cho mỗi episode vào tệp tin JSON
-    with open('result/ave_delay_per_episode.json', 'w') as f:
-        json.dump(ave_delay_per_episode, f)
-
-    with open('result/ave_link_util_per_episode.json', 'w') as f:
-        json.dump(ave_link_util_per_episode, f)
+ 

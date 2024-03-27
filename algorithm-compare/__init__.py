@@ -7,3 +7,5 @@ from . import ucb
 from . import main
 from . import ppo
 from .ppo import *
+from .main import *
+

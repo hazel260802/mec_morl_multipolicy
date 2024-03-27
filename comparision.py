@@ -1,80 +1,174 @@
+import gym as gym
 import torch
+import numpy as np
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+import tianshou as ts
+from copy import deepcopy
+from tianshou.env import DummyVectorEnv
+from torch.optim.lr_scheduler import LambdaLR
+import torch.nn.functional as F
+import os
+import time
 import json
-from env import SDN_Env  # Import your environment class
-from network import conv_mlp_net  # Import your network architecture
-from train import edge_num, cloud_num, expn  # Import your training parameters
-# Define the function to load the trained model
-def load_model(model, filename):
-    # Load the model state dict from the file
-    model.load_state_dict(torch.load(filename))
-    print('Model loaded successfully.')
+import math
+from tqdm import tqdm
+from env import SDN_Env
+from network import conv_mlp_net
+from tianshou.utils.net.discrete import Actor, Critic
+import matplotlib.pyplot as plt
 
-# Define the function to simulate the network using an actor model
-def simulate_network(actor, env, num_episodes=10):
-    delay_data = []
-    link_utilization_data = []
+cloud_num = 1
+edge_num = 1
+expn = 'exp1'
+config = 'multi-edge'
+lr, epoch, batch_size = 1e-6, 1, 1024 * 4
+train_num, test_num = 64, 1024
+gamma, lr_decay = 0.9, None
+buffer_size = 100000
+eps_train, eps_test = 0.1, 0.00
+step_per_epoch, episode_per_collect = 100 * train_num * 700, train_num
+writer = SummaryWriter('tensor-board-log/ppo')
+logger = ts.utils.TensorboardLogger(writer)
+is_gpu_default = torch.cuda.is_available()
 
-    for _ in range(num_episodes):
-        obs = env.reset()
-        total_delay = 0
-        total_link_utilization = 0
+gae_lambda, max_grad_norm = 0.95, 0.5
+vf_coef, ent_coef = 0.5, 0.0
+rew_norm, action_scaling = False, False
+bound_action_method = "clip"
+eps_clip, value_clip = 0.2, False
+repeat_per_collect = 2
+dual_clip, norm_adv = None, 0.0
+recompute_adv = 0
 
+INPUT_CH = 67
+FEATURE_CH = 512
+MLP_CH = 1024
+
+class sdn_net(nn.Module):
+    def __init__(self, mode='actor', is_gpu=is_gpu_default):
+        super().__init__()
+        self.is_gpu = is_gpu
+        self.mode = mode
+        if self.mode == 'actor':
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
+        else:
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
+
+    def load_model(self, filename):
+        map_location = lambda storage, loc: storage
+        self.load_state_dict(torch.load(filename, map_location=map_location))
+        print('load model!')
+
+    def save_model(self, filename):
+        directory = os.path.dirname(filename)
+        os.makedirs(directory, exist_ok=True)
+        torch.save(self.state_dict(), filename)
+
+    def forward(self, obs, state=None, info={}):
+        state = torch.tensor(obs).float()
+        if self.is_gpu:
+            state = state.cuda()
+        logits = self.network(state)
+        return logits, state
+
+class Actor(nn.Module):
+    def __init__(self, is_gpu=is_gpu_default, dist_fn=None):
+        super().__init__()
+        self.is_gpu = is_gpu
+        self.net = sdn_net(mode='actor')
+        self.dist_fn = dist_fn  
+
+    def load_model(self, filename):
+        map_location = lambda storage, loc: storage
+        self.load_state_dict(torch.load(filename, map_location=map_location))
+        print('load model!')
+
+    def save_model(self, filename):
+        directory = os.path.dirname(filename)
+        os.makedirs(directory, exist_ok=True)
+        torch.save(self.state_dict(), filename)
+
+    def forward(self, obs, state=None, info={}):
+        logits,_ = self.net(obs)
+        logits = F.softmax(logits, dim=-1)
+        return logits, state
+
+class Critic(nn.Module):
+    def __init__(self, is_gpu=is_gpu_default):
+        super().__init__()
+        self.is_gpu = is_gpu
+        self.net = sdn_net(mode='critic')
+
+    def load_model(self, filename):
+        map_location = lambda storage, loc: storage
+        self.load_state_dict(torch.load(filename, map_location=map_location))
+        print('load model!')
+
+    def save_model(self, filename):
+        directory = os.path.dirname(filename)
+        os.makedirs(directory, exist_ok=True)
+        torch.save(self.state_dict(), filename)
+
+    def forward(self, obs, state=None, info={}):
+        v,_ = self.net(obs)
+        return v
+
+import numpy as np
+
+# Định nghĩa hàm tính Pareto dominance
+def pareto_dominance(y1, y2):
+    """
+    Kiểm tra xem một điểm y1 có Pareto dominate điểm y2 hay không.
+    """
+    return all(y1_i <= y2_i for y1_i, y2_i in zip(y1, y2)) and any(y1_i < y2_i for y1_i, y2_i in zip(y1, y2))
+
+# Load các mô hình đã huấn luyện từ w00 đến w100
+trained_models = {}
+for wi in range(100, 101, 2):
+    actor = Actor(is_gpu=is_gpu_default)
+    critic = Critic(is_gpu=is_gpu_default)
+    actor.load_model(f'save/pth-e{edge_num}/cloud{cloud_num}/{expn}/w{wi:03d}/ep{epoch:02d}-actor.pth')
+    critic.load_model(f'save/pth-e{edge_num}/cloud{cloud_num}/{expn}/w{wi:03d}/ep{epoch:02d}-critic.pth')
+    trained_models[wi] = (actor, critic)
+
+# Tính toán hiệu suất của các mô hình
+performance = {}
+for wi, (actor, critic) in trained_models.items():
+    env = SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)
+    avg_link_utilisation = []
+    avg_delay = []
+    for _ in range(100):  # Số lượng thử nghiệm
+        state = env.reset()
         done = False
         while not done:
-            # Select an action using the actor model
-            action, _ = actor(torch.tensor(obs).float())
-            action = action.argmax().item()
+            action = actor(torch.tensor(state).float())[0].argmax().item()
+            next_state, reward, done, _ = env.step(action)
+            state = next_state
+        delay, link_utilisation = env.estimate_performance()
+        avg_link_utilisation.append(link_utilisation)
+        avg_delay.append(delay)
+    # Tính toán giá trị trung bình của delay và link_utilisation
+    avg_delay = np.mean(avg_delay)
+    avg_link_utilisation = np.mean(avg_link_utilisation)
+    # Lưu thông số hiệu suất vào performance dictionary
+    performance[wi] = (avg_delay, avg_link_utilisation)
 
-            # Simulate the network using the selected action
-            next_obs, reward, done, info = env.step(action)
+# Tách các điểm dữ liệu từ dictionary performance
+pareto_delay = []
+pareto_link_utilisation = []
+for wi, (delay, link_utilisation) in performance.items():
+    pareto_delay.append(delay)
+    pareto_link_utilisation.append(link_utilisation)
 
-            # Update delay and link utilization data
-            total_delay += info['delay']
-            total_link_utilization += info['link_utilization']
-
-            obs = next_obs
-
-        # Calculate average delay and link utilization for the episode
-        avg_delay, avg_link_utilization = env.estimate_performance()
-
-        # Append to the data lists
-        delay_data.append(avg_delay)
-        link_utilization_data.append(avg_link_utilization)
-
-    return delay_data, link_utilization_data
-
-# Define the path to the directory containing actor models
-actor_models_dir = 'save/pth-e%d/cloud%d/%s/w100/' % (edge_num, cloud_num, expn)
-
-# Create an empty list to store actor models
-actor_models = []
-
-# Load each actor model from ep00 to ep10 and append to the list
-for i in range(11):
-    # Build the path to the actor model file
-    actor_model_path = actor_models_dir + 'ep%02d-actor.pth' % i
-    
-    # Create a new actor model
-    actor_model = conv_mlp_net()  # Modify this line according to your actor network architecture
-    
-    # Load the actor model
-    load_model(actor_model, actor_model_path)
-    
-    # Append the loaded actor model to the list
-    actor_models.append(actor_model)
-
-# Create an instance of your environment
-env = SDN_Env(conf_name='multi-edge', w=0.5, fc=4e9, fe=2e9, edge_num=1, cloud_num=1)  # Modify parameters accordingly
-
-# Simulate the network using each loaded actor model and save the results
-num_episodes = 10  # Modify as needed
-
-for idx, actor_model in enumerate(actor_models):
-    delay_data, link_utilization_data = simulate_network(actor_model, env, num_episodes)
-    
-    # Save the delay and link utilization data to JSON files
-    with open('delay_data_ep%02d.json' % idx, 'w') as f:
-        json.dump(delay_data, f)
-
-    with open('link_utilization_data_ep%02d.json' % idx, 'w') as f:
-        json.dump(link_utilization_data, f)
+# Vẽ biểu đồ scatter plot
+plt.figure(figsize=(8, 6))
+plt.scatter(pareto_delay, pareto_link_utilisation, color='red', label='Pareto Front')
+plt.xlabel('Delay')
+plt.ylabel('Link Utilization')
+plt.title('Pareto Front Models: Delay vs Link Utilization')
+plt.grid(True)
+plt.legend()
+plt.show()
