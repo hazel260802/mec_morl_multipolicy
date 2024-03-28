@@ -13,13 +13,15 @@ import time
 import json
 import math
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 from env import SDN_Env
 from network import conv_mlp_net
 from tianshou.utils.net.discrete import Actor, Critic
-import matplotlib.pyplot as plt
+from paretoset import paretoset
+import pandas as pd
 
-cloud_num = 8
-edge_num = 8
+cloud_num = 1
+edge_num = 1
 expn = 'exp1'
 config = 'multi-edge'
 lr, epoch, batch_size = 1e-6, 1, 1024 * 4
@@ -68,7 +70,7 @@ class sdn_net(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        state = torch.tensor(obs).float()
+        state = torch.tensor(obs).float().clone().detach().requires_grad_(True)
         if self.is_gpu:
             state = state.cuda()
         logits = self.network(state)
@@ -116,19 +118,10 @@ class Critic(nn.Module):
         v,_ = self.net(obs)
         return v
 
-import numpy as np
-
-# Định nghĩa hàm tính Pareto dominance
-def pareto_dominance(y1, y2):
-    """
-    Kiểm tra xem một điểm y1 có Pareto dominate điểm y2 hay không.
-    """
-    return all(y1_i <= y2_i for y1_i, y2_i in zip(y1, y2)) and any(y1_i < y2_i for y1_i, y2_i in zip(y1, y2))
-
 # Load các mô hình đã huấn luyện từ w00 đến w100
 trained_models = {}
 
-for wi in range(0, 101, 2):
+for wi in range(100, -1, -1):
     actor = Actor(is_gpu=is_gpu_default)
     critic = Critic(is_gpu=is_gpu_default)
     
@@ -142,87 +135,93 @@ for wi in range(0, 101, 2):
     else:
         # Thực hiện xử lý nếu file không tồn tại, ví dụ: thông báo hoặc pass
         pass
-# Tính toán hiệu suất của các mô hình
-performance = {}
+# Tạo môi trường không huấn luyện với edge_num và cloud_num mong muốn
+untrained_env = SDN_Env(conf_name=config, w=0.5, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)
+
+# List to store solutions from all episodes for each wi
+train_wi_delay_solutions = []
+train_wi_link_utilisation_solutions = []
+untrained_wi_delay_solutions = []
+untrained_wi_link_utilisation_solutions = []
+
+# Collect solutions from all episodes for each wi
 for wi, (actor, critic) in trained_models.items():
     env = SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)
-    avg_link_utilisation = []
-    avg_delay = []
-    for _ in range(100):  # Số lượng thử nghiệm
+    train_delay_solutions = []
+    train_link_utilisation_solutions = []
+    untrained_delay_solutions = []
+    untrained_link_utilisation_solutions = []
+    for _ in range(1):  # Number of episodes
+        # For trained models
         state = env.reset()
         done = False
+        trained_episode_solutions = []
         while not done:
             # Choose action using the actor model
             action, _ = actor(torch.tensor(state).float())
             action = action.argmax().item()
             next_state, reward, done, _ = env.step(action)
+            # Collect objective values (delay, link utilization) for each step in the episode
             state = next_state
         delay, link_utilisation = env.estimate_performance()
-        avg_link_utilisation.append(link_utilisation)
-        avg_delay.append(delay)
-    # Tính toán giá trị trung bình của delay và link_utilisation
-    avg_delay = np.mean(avg_delay)
-    avg_link_utilisation = np.mean(avg_link_utilisation)
-    # Lưu thông số hiệu suất vào performance dictionary
-    performance[wi] = (avg_delay, avg_link_utilisation)
-
-# Tách các điểm dữ liệu từ dictionary performance
-pareto_delay = []
-pareto_link_utilisation = []
-for wi, (delay, link_utilisation) in performance.items():
-    pareto_delay.append(delay)
-    pareto_link_utilisation.append(link_utilisation)
-
-# Tạo môi trường không huấn luyện với edge_num và cloud_num mong muốn
-untrained_env = SDN_Env(conf_name=config, w=0.5, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)
-
-# Tính toán hiệu suất của các mô hình đã huấn luyện trước đó trên môi trường không huấn luyện
-trained_performance = {}
-for wi, (actor, critic) in trained_models.items():
-    avg_link_utilisation = []
-    avg_delay = []
-    for _ in range(100):  # Số lượng thử nghiệm
+        train_delay_solutions.append(delay)
+        train_link_utilisation_solutions.append(link_utilisation)
+        # For untrained models
         state = untrained_env.reset()
         done = False
+        untrained_actor = Actor(is_gpu=is_gpu_default)
+        untrained_critic = Critic(is_gpu=is_gpu_default)
+        untrained_episode_solutions = []
         while not done:
-            # Choose action using the actor model
-            action, _ = actor(torch.tensor(state).float())
+            # Choose action using the actor model of the untrained model
+            action, _ = untrained_actor(torch.tensor(state).float())
             action = action.argmax().item()
             next_state, reward, done, _ = untrained_env.step(action)
             state = next_state
         delay, link_utilisation = untrained_env.estimate_performance()
-        avg_link_utilisation.append(link_utilisation)
-        avg_delay.append(delay)
-    # Tính toán giá trị trung bình của delay và link_utilisation
-    avg_delay = np.mean(avg_delay)
-    avg_link_utilisation = np.mean(avg_link_utilisation)
-    # Lưu thông số hiệu suất vào trained_performance dictionary
-    trained_performance[wi] = (avg_delay, avg_link_utilisation)
+        untrained_delay_solutions.append(delay)
+        untrained_link_utilisation_solutions.append(link_utilisation)    
+    train_wi_delay_solutions.append(np.mean(train_delay_solutions, axis=0))
+    train_wi_link_utilisation_solutions.append(np.mean(train_link_utilisation_solutions, axis=0))
+    untrained_wi_delay_solutions.append(np.mean(untrained_delay_solutions, axis=0))
+    untrained_wi_link_utilisation_solutions.append(np.mean(untrained_link_utilisation_solutions, axis=0))
 
-# Tách các điểm dữ liệu từ dictionary trained_performance
+train_solutions = pd.DataFrame(
+    {
+        "delay": train_wi_delay_solutions,
+        "link_utilisation": train_wi_link_utilisation_solutions,
+    }
+)
+untrained_solutions = pd.DataFrame(
+    {
+        "delay": untrained_wi_delay_solutions,
+        "link_utilisation": untrained_wi_link_utilisation_solutions,
+    }
+)
+# Compute the Pareto front for all solutions
+trained_all_mask = paretoset(train_solutions, sense=["min", "min"])
+untrained_all_mask = paretoset(untrained_solutions, sense=["min", "min"])
+# Filter the list of solutions, keeping only the non-dominated solutions
+trained_efficient_solutions = train_solutions[trained_all_mask]
+untrained_efficient_solutions = untrained_solutions[untrained_all_mask]
 trained_pareto_delay = []
 trained_pareto_link_utilisation = []
-for wi, (delay, link_utilisation) in trained_performance.items():
-    trained_pareto_delay.append(delay)
-    trained_pareto_link_utilisation.append(link_utilisation)
-
-# Vẽ biểu đồ scatter plot so sánh giữa các mô hình đã huấn luyện và môi trường không huấn luyện
+untrained_pareto_delay = []
+untrained_pareto_link_utilisation = []
+# Extract delay and link utilization for trained efficient solutions
+for index, row in trained_efficient_solutions.iterrows():
+    trained_pareto_delay.append(row['delay'])
+    trained_pareto_link_utilisation.append(row['link_utilisation'])
+for index, row in untrained_efficient_solutions.iterrows():
+    untrained_pareto_delay.append(row['delay'])
+    untrained_pareto_link_utilisation.append(row['link_utilisation'])
+# Scatter plot comparison
 plt.figure(figsize=(8, 6))
-plt.scatter(pareto_delay, pareto_link_utilisation, color='red', label='Untrained')
 plt.scatter(trained_pareto_delay, trained_pareto_link_utilisation, color='blue', label='Trained')
-plt.xlabel('Delay')
-plt.ylabel('Link Utilization')
+plt.scatter(untrained_pareto_delay, untrained_pareto_link_utilisation, color='red', label='Untrained')
+plt.xlabel('Delay (s)')
+plt.ylabel('Link Utilization (Mbps)')
 plt.title('Comparison: Trained vs Untrained Pareto Front Models')
-plt.grid(True)
-plt.legend()
-plt.show()
-
-# Vẽ biểu đồ đường riêng cho trained preferences
-plt.figure(figsize=(8, 6))
-plt.plot(trained_pareto_delay, trained_pareto_link_utilisation, color='blue', label='MORL')
-plt.xlabel('Delay')
-plt.ylabel('Link uitilization ')
-plt.title('MORL Model Pareto Front')
 plt.grid(True)
 plt.legend()
 plt.show()
