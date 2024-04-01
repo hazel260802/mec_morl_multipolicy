@@ -31,13 +31,14 @@ def preprocess_state(state):
     mean_state = np.mean(state, axis=0)
     return mean_state
 
-def run_ucb1(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, c=2):
+def run_ucb1(env, edge_observation_space, cloud_observation_space, num_episodes, alpha=0.1, gamma=0.99, c=2):
     """
     Runs the UCB1 algorithm for action selection in a given environment.
 
     Args:
     - env: The environment.
-    - observation_space: The observation space of the environment.
+    - edge_observation_space: The observation space of the edge servers.
+    - cloud_observation_space: The observation space of the cloud servers.
     - num_episodes: Number of episodes to run the algorithm.
     - alpha: Learning rate.
     - gamma: Discount factor for future rewards.
@@ -47,43 +48,67 @@ def run_ucb1(env, observation_space, num_episodes, alpha=0.1, gamma=0.99, c=2):
     - avg_delays: A list containing the average delay per task for each episode.
     - avg_link_utilisations: A list containing the average link utilisation per task for each episode.
     """
-    num_states = observation_space.shape[0]  # Number of states
-    num_actions = env.action_space.n  # Number of actions
-    Q = np.zeros((num_states, num_actions))  # Initialize action-value estimates
-    N = np.zeros((num_states, num_actions))  # Count of visits for each action
+    num_edge_states = edge_observation_space.shape[0]  # Number of edge states
+    num_cloud_states = cloud_observation_space.shape[0]  # Number of cloud states
+    num_edge_actions = edge_observation_space.shape[1]  # Number of edge actions
+    num_cloud_actions = cloud_observation_space.shape[1]  # Number of cloud actions
+    
+    Q_edge = np.zeros((num_edge_states, num_edge_actions))  # Initialize Q-table for edge
+    Q_cloud = np.zeros((num_cloud_states, num_cloud_actions))  # Initialize Q-table for cloud
+
+    N_edge = np.zeros((num_edge_states, num_edge_actions))  # Count of visits for each action
+    N_cloud = np.zeros((num_cloud_states, num_cloud_actions))  # Count of visits for each action
     
     avg_delays = []  # List to store average delay per task for each episode
     avg_link_utilisations = []  # List to store average link utilisation per task for each episode
     
     for _ in range(num_episodes):
         state = env.reset()  # Reset the environment to initial state
-        total_delay = 0  # Initialize total delay for this episode
-        total_link_utilisation = 0  # Initialize total link utilisation for this episode
-        total_tasks = 0  # Initialize total number of tasks for this episode
+        edge_state, cloud_state = state['edge_servers'], state['cloud_servers']  # Get the initial state for edge and cloud
         done = False  # Initialize flag indicating whether the episode has ended
         t = 0  # Total time steps
         while not done:
             t += 1  # Increment time step
             
             # Preprocess the current state
-            processed_state = preprocess_state(state)
+            processed_edge_state = preprocess_state(edge_state)
+            processed_cloud_state = preprocess_state(cloud_state)
             
-            if np.all((0 <= processed_state) & (processed_state < num_states)):
-                max_action = ucb1(Q[processed_state.astype(int)], N[processed_state.astype(int)], t, c)  # Select action using UCB1
-                if max_action in range(num_actions):
-                            action = max_action
-            next_state, reward, done, _ = env.step(action)  # Take a step in the environment
-            # Update action-value estimates and visit counts using Q-learning update rule
-            if state.shape[0] in range(num_states) and action in range(num_actions):
-                N[processed_state.astype(int), action] += 1
-                Q[processed_state.astype(int), action] += alpha * (reward + gamma * np.max(Q[next_state.astype(int)]) - Q[processed_state.astype(int), action])
-            state = next_state  # Move to the next state
+            # Action selection for edge
+            if np.all((0 <= processed_edge_state) & (processed_edge_state < num_edge_states)):
+                edge_action = ucb1(Q_edge[processed_edge_state.astype(int)], N_edge[processed_edge_state.astype(int)], t, c)
+            else:
+                edge_action = np.random.choice(num_edge_actions)  # Random action if state is out of bounds
+            
+            # Action selection for cloud
+            if np.all((0 <= processed_cloud_state) & (processed_cloud_state < num_cloud_states)):
+                cloud_action = ucb1(Q_cloud[processed_cloud_state.astype(int)], N_cloud[processed_cloud_state.astype(int)], t, c)
+            else:
+                cloud_action = np.random.choice(num_cloud_actions)  # Random action if state is out of bounds
+            
+            actions = np.array([edge_action, cloud_action])
+            # Take a step in the environment based on the selected actions
+            next_state, reward, done, _ = env.step(actions)
+            
+            # Update action-value estimates and visit counts for edge using Q-learning update rule
+            if edge_state.shape[0] in range(num_edge_states) and edge_action in range(num_edge_actions):
+                N_edge[processed_edge_state.astype(int), edge_action] += 1
+                Q_edge[processed_edge_state.astype(int), edge_action] += alpha * (reward + gamma * np.max(Q_edge[next_state['edge_servers'].astype(int)]) - Q_edge[processed_edge_state.astype(int), edge_action])
+            
+            # Update action-value estimates and visit counts for cloud using Q-learning update rule
+            if cloud_state.shape[0] in range(num_cloud_states) and cloud_action in range(num_cloud_actions):
+                N_cloud[processed_cloud_state.astype(int), cloud_action] += 1
+                Q_cloud[processed_cloud_state.astype(int), cloud_action] += alpha * (reward + gamma * np.max(Q_cloud[next_state['cloud_servers'].astype(int)]) - Q_cloud[processed_cloud_state.astype(int), cloud_action])
+            
+            # Transition to the next state
+            edge_state, cloud_state = next_state['edge_servers'], next_state['cloud_servers']
         
         # Calculate average delay and link utilisation for this episode
         avg_delay, avg_link_utilisation = env.estimate_performance()
         
         avg_delays.append(avg_delay)  # Append the average delay per task for this episode to the list
         avg_link_utilisations.append(avg_link_utilisation)  # Append the average link utilisation per task for this episode to the list
+    
     print("Average delay per task for each episode:", avg_delays)
     print("Average link utilisation per task for each episode:", avg_link_utilisations)
     return avg_delays, avg_link_utilisations

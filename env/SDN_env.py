@@ -80,15 +80,9 @@ class SDN_Env():
         self.cloud_num = np.random.randint(self.cloud_num_L, self.cloud_num_H + 1) if not cloud_num else cloud_num
         self.action_space = gym.spaces.MultiDiscrete([self.edge_num, self.cloud_num])
 
-        # Tổng số máy chủ (bao gồm cả máy chủ cạnh và máy chủ đám mây)
-        total_servers = self.edge_num + self.cloud_num
-
-        # Tính toán kích thước của không gian quan sát
-        observation_space_shape = total_servers
-
         # Định nghĩa không gian quan sát
-        self.observation_space = spaces.Box(low=0, high=1, shape=(observation_space_shape,), dtype=np.float32)
-
+        self.edge_observation_space = spaces.Box(low=0, high=1, shape=(self.edge_num,), dtype=np.float32)
+        self.cloud_observation_space = spaces.Box(low=0, high=1, shape=(self.cloud_num,), dtype=np.float32)
         # print(f"Action Space: {self.action_space}")
         # Initialize the environment
         self.reset()  
@@ -403,7 +397,6 @@ class SDN_Env():
 
         # Print the size of the action
         print(f"Size of Action: {actions}")
-
         # Print the size of the reward
         print(f"Size of Reward: {reward}")
         
@@ -496,7 +489,7 @@ class SDN_Env():
 
         # Combine edge and cloud observations into a single state dictionary
         observation = {'edge_servers': obs['edge_servers'], 'cloud_servers': obs['cloud_servers']}
-
+        # print(obs['edge_servers'].shape, obs['cloud_servers'].shape)
         return observation
 
     def estimate_rew(self):

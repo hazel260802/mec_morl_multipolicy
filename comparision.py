@@ -52,11 +52,16 @@ class sdn_net(nn.Module):
         super().__init__()
         self.is_gpu = is_gpu
         self.mode = mode
+
         if self.mode == 'actor':
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
+            self.edge_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=edge_num * FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num, block_num=3)
+            self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=cloud_num * FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
         else:
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+            self.edge_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num, block_num=3)
+            self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
                                     mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
 
     def load_model(self, filename):
@@ -70,17 +75,29 @@ class sdn_net(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        state = torch.tensor(obs).float().clone().detach().requires_grad_(True)
+        
+        state = obs
+        state = torch.tensor(state).float()
         if self.is_gpu:
             state = state.cuda()
-        logits = self.network(state)
+        # Chỉ trả về kết quả từ mạng tương ứng với chế độ
+        logits = None
+        if hasattr(self, 'edge_net') and self.edge_net is not None:
+            logits = self.edge_net(state)
+        # Kiểm tra xem self.cloud_net có được khởi tạo hay không
+        elif hasattr(self, 'cloud_net') and self.cloud_net is not None:
+            logits = self.cloud_net(state)
+        # print("State: ", state)
+        # print("Logits: ", logits)
         return logits, state
+
 
 class Actor(nn.Module):
     def __init__(self, is_gpu=is_gpu_default, dist_fn=None):
         super().__init__()
         self.is_gpu = is_gpu
-        self.net = sdn_net(mode='actor')
+        self.edge_net = sdn_net(mode='actor')
+        self.cloud_net = sdn_net(mode='actor')
         self.dist_fn = dist_fn  
 
     def load_model(self, filename):
@@ -94,15 +111,24 @@ class Actor(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        logits,_ = self.net(obs)
-        logits = F.softmax(logits, dim=-1)
-        return logits, state
+        logits_edge, _ = self.edge_net(obs['edge_servers'])
+        # print(logits_edge)
+        logits_edge = F.softmax(logits_edge, dim=-1)
+
+        logits_cloud, _ = self.cloud_net(obs['cloud_servers'])
+        logits_cloud = F.softmax(logits_cloud, dim=-1)
+        # print(logits_edge, logits_cloud)
+        return logits_edge, logits_cloud
 
 class Critic(nn.Module):
     def __init__(self, is_gpu=is_gpu_default):
+        # print(f"Batch keys: {self.__dict__.keys()}")
         super().__init__()
+
         self.is_gpu = is_gpu
-        self.net = sdn_net(mode='critic')
+
+        self.edge_net = sdn_net(mode='critic')
+        self.cloud_net = sdn_net(mode='critic')
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -115,8 +141,10 @@ class Critic(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        v,_ = self.net(obs)
-        return v
+        v_edge, _ = self.edge_net(obs['edge_servers'])
+        v_cloud, _ = self.cloud_net(obs['cloud_servers'])
+        print(v_edge, v_cloud)
+        return v_edge, v_cloud
 
 # Load các mô hình đã huấn luyện từ w00 đến w100
 trained_models = {}
@@ -153,31 +181,38 @@ for wi, (actor, critic) in trained_models.items():
     untrained_link_utilisation_solutions = []
     for _ in range(1):  # Number of episodes
         # For trained models
-        state = env.reset()
+        obs = env.reset()
         done = False
-        trained_episode_solutions = []
         while not done:
-            # Choose action using the actor model
-            action, _ = actor(torch.tensor(state).float())
-            action = action.argmax().item()
-            next_state, reward, done, _ = env.step(action)
-            # Collect objective values (delay, link utilization) for each step in the episode
-            state = next_state
+            # Choose actions using the actor model
+            logits_edge, logits_cloud = actor(obs)
+            edge_action = torch.argmax(logits_edge).item()
+            cloud_action = torch.argmax(logits_cloud).item()
+
+            # Perform actions and observe next state and reward
+            next_obs, reward, done, info = env.step([edge_action, cloud_action])
+            # Update current observation
+            obs = next_obs
+
         delay, link_utilisation = env.estimate_performance()
         train_delay_solutions.append(delay)
         train_link_utilisation_solutions.append(link_utilisation)
         # For untrained models
-        state = untrained_env.reset()
+        obs = untrained_env.reset()
         done = False
         untrained_actor = Actor(is_gpu=is_gpu_default)
         untrained_critic = Critic(is_gpu=is_gpu_default)
         untrained_episode_solutions = []
         while not done:
-            # Choose action using the actor model of the untrained model
-            action, _ = untrained_actor(torch.tensor(state).float())
-            action = action.argmax().item()
-            next_state, reward, done, _ = untrained_env.step(action)
-            state = next_state
+            # Choose actions using the actor model
+            logits_edge, logits_cloud = actor(obs)
+            edge_action = torch.argmax(logits_edge).item()
+            cloud_action = torch.argmax(logits_cloud).item()
+
+            # Perform actions and observe next state and reward
+            next_obs, reward, done, info = env.step([edge_action, cloud_action])
+            # Update current observation
+            obs = next_obs
         delay, link_utilisation = untrained_env.estimate_performance()
         untrained_delay_solutions.append(delay)
         untrained_link_utilisation_solutions.append(link_utilisation)    

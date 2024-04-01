@@ -61,8 +61,10 @@ class sdn_net(nn.Module):
             self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=cloud_num * FEATURE_CH,\
                                     mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
         else:
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
+            self.edge_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num, block_num=3)
+            self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -75,21 +77,18 @@ class sdn_net(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
+        
         state = obs
         state = torch.tensor(state).float()
         if self.is_gpu:
             state = state.cuda()
         # Chỉ trả về kết quả từ mạng tương ứng với chế độ
         logits = None
-        if self.mode == 'actor':
-            # Kiểm tra xem self.edge_net có được khởi tạo hay không
-            if hasattr(self, 'edge_net') and self.edge_net is not None:
-                logits = self.edge_net(state)
-            # Kiểm tra xem self.cloud_net có được khởi tạo hay không
-            elif hasattr(self, 'cloud_net') and self.cloud_net is not None:
-                logits = self.cloud_net(state)
-        else:
-            logits = self.network(state)
+        if hasattr(self, 'edge_net') and self.edge_net is not None:
+            logits = self.edge_net(state)
+        # Kiểm tra xem self.cloud_net có được khởi tạo hay không
+        elif hasattr(self, 'cloud_net') and self.cloud_net is not None:
+            logits = self.cloud_net(state)
         # print("State: ", state)
         # print("Logits: ", logits)
         return logits, state
@@ -115,7 +114,7 @@ class Actor(nn.Module):
 
     def forward(self, obs, state=None, info={}):
         logits_edge, _ = self.edge_net(obs['edge_servers'])
-        print(logits_edge)
+        # print(logits_edge)
         logits_edge = F.softmax(logits_edge, dim=-1)
 
         logits_cloud, _ = self.cloud_net(obs['cloud_servers'])
@@ -130,7 +129,8 @@ class Critic(nn.Module):
 
         self.is_gpu = is_gpu
 
-        self.net = sdn_net(mode='critic')
+        self.edge_net = sdn_net(mode='critic')
+        self.cloud_net = sdn_net(mode='critic')
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -143,9 +143,10 @@ class Critic(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-            
-        v,_ = self.net(obs)
-        return v
+        v_edge, _ = self.edge_net(obs['edge_servers'])
+        v_cloud, _ = self.cloud_net(obs['cloud_servers'])
+        print(v_edge, v_cloud)
+        return v_edge, v_cloud
 class PPOPolicy(ts.policy.PPOPolicy):
     def __init__(self, actor, critic, optim, dist_fn, discount_factor=0.99, gae_lambda=0.95,
                  max_grad_norm=None, eps_clip=0.2, vf_coef=0.5, ent_coef=0.0,
@@ -180,7 +181,7 @@ class PPOPolicy(ts.policy.PPOPolicy):
         return Batch(
             logits=(logits_edge, logits_cloud),
             act=action,
-            state=(None, None),
+            state=state,
             dist=(dist_edge, dist_cloud)
         )
 

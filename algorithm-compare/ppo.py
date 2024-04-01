@@ -1,5 +1,5 @@
 import torch
-def run_ppo(env, observation_space, num_episodes=1000, actor=None, critic=None):
+def run_ppo(env, num_episodes=1000, actor=None, critic=None):
     if actor is None or critic is None:
         print("Error: Actor and Critic models must be provided.")
         return [], []
@@ -12,12 +12,13 @@ def run_ppo(env, observation_space, num_episodes=1000, actor=None, critic=None):
         obs = env.reset()
         done = False
         while not done:
-            # Choose action using the actor model
-            action, _ = actor(torch.tensor(obs).float())
-            action = action.argmax().item()
+            # Choose actions using the actor model
+            logits_edge, logits_cloud = actor(obs)
+            edge_action = torch.argmax(logits_edge).item()
+            cloud_action = torch.argmax(logits_cloud).item()
 
-            # Perform action and observe next state and reward
-            next_obs, reward, done, info = env.step(action)
+            # Perform actions and observe next state and reward
+            next_obs, reward, done, info = env.step([edge_action, cloud_action])
             # Update current observation
             obs = next_obs
 
@@ -27,6 +28,9 @@ def run_ppo(env, observation_space, num_episodes=1000, actor=None, critic=None):
         # Append to lists
         delays.append(avg_delay)
         link_utilisations.append(avg_link_utilisation)
+        
+        print(f"Episode {episode + 1}/{num_episodes}, Avg. Delay: {avg_delay}, Avg. Link Utilization: {avg_link_utilisation}")
+
     print("Average delay per task for each episode:", delays)
     print("Average link utilisation per task for each episode:", link_utilisations) 
     return delays, link_utilisations
