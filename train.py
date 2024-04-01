@@ -1,5 +1,6 @@
 import gym as gym
-
+from tianshou.data import Batch
+from typing import Optional, Union, Any
 import torch
 import numpy as np
 import torch.nn as nn
@@ -17,6 +18,8 @@ from tqdm import tqdm
 from env import SDN_Env
 from network import conv_mlp_net
 from tianshou.utils.net.discrete import Actor, Critic
+from tianshou.env.gym_wrappers import MultiDiscreteToDiscrete
+from tianshou.env import VectorEnvWrapper
 
 cloud_num = 1
 edge_num = 1
@@ -53,11 +56,13 @@ class sdn_net(nn.Module):
         self.mode = mode
 
         if self.mode == 'actor':
-            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
+            self.edge_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=edge_num * FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num, block_num=3)
+            self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=cloud_num * FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
         else:
             self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
+                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
 
     def load_model(self, filename):
         map_location = lambda storage, loc: storage
@@ -70,14 +75,23 @@ class sdn_net(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        state = torch.tensor(obs).float()
-        # print("Input shape:", state.shape)
+        state = obs
+        state = torch.tensor(state).float()
         if self.is_gpu:
             state = state.cuda()
-
-        logits = self.network(state)
-        # print("Output shape:", logits)
-
+        # Chỉ trả về kết quả từ mạng tương ứng với chế độ
+        logits = None
+        if self.mode == 'actor':
+            # Kiểm tra xem self.edge_net có được khởi tạo hay không
+            if hasattr(self, 'edge_net') and self.edge_net is not None:
+                logits = self.edge_net(state)
+            # Kiểm tra xem self.cloud_net có được khởi tạo hay không
+            elif hasattr(self, 'cloud_net') and self.cloud_net is not None:
+                logits = self.cloud_net(state)
+        else:
+            logits = self.network(state)
+        # print("State: ", state)
+        # print("Logits: ", logits)
         return logits, state
 
 
@@ -85,7 +99,8 @@ class Actor(nn.Module):
     def __init__(self, is_gpu=is_gpu_default, dist_fn=None):
         super().__init__()
         self.is_gpu = is_gpu
-        self.net = sdn_net(mode='actor')
+        self.edge_net = sdn_net(mode='actor')
+        self.cloud_net = sdn_net(mode='actor')
         self.dist_fn = dist_fn  
 
     def load_model(self, filename):
@@ -99,9 +114,14 @@ class Actor(nn.Module):
         torch.save(self.state_dict(), filename)
 
     def forward(self, obs, state=None, info={}):
-        logits,_ = self.net(obs)
-        logits = F.softmax(logits, dim=-1)
-        return logits, state
+        logits_edge, _ = self.edge_net(obs['edge_servers'])
+        print(logits_edge)
+        logits_edge = F.softmax(logits_edge, dim=-1)
+
+        logits_cloud, _ = self.cloud_net(obs['cloud_servers'])
+        logits_cloud = F.softmax(logits_cloud, dim=-1)
+        # print(logits_edge, logits_cloud)
+        return logits_edge, logits_cloud
 
 class Critic(nn.Module):
     def __init__(self, is_gpu=is_gpu_default):
@@ -125,8 +145,45 @@ class Critic(nn.Module):
     def forward(self, obs, state=None, info={}):
             
         v,_ = self.net(obs)
-
         return v
+class PPOPolicy(ts.policy.PPOPolicy):
+    def __init__(self, actor, critic, optim, dist_fn, discount_factor=0.99, gae_lambda=0.95,
+                 max_grad_norm=None, eps_clip=0.2, vf_coef=0.5, ent_coef=0.0,
+                 reward_normalization=False, advantage_normalization=False,
+                 action_scaling=True, recompute_advantage=False, dual_clip=None,
+                 value_clip=False, action_space=None, lr_scheduler=None,
+                 update_per_collect=1):
+        super().__init__(actor, critic, optim, dist_fn)
+
+    def forward(
+        self,
+        batch: Batch,
+        state: Optional[Union[dict, Batch, np.ndarray]] = None,
+        **kwargs: Any,
+    ) -> Batch:
+        logits_edge, logits_cloud = self.actor(batch.obs, state=state)
+        dist_edge, dist_cloud = self.dist_fn(logits_edge, logits_cloud)  
+        print(dist_edge, dist_cloud)
+        if self._deterministic_eval and not self.training:
+            act_edge = logits_edge.argmax(-1)
+            act_cloud = logits_cloud.argmax(-1) 
+        else:
+            act_edge = dist_edge.sample()
+            act_cloud = dist_cloud.sample()
+        print(act_edge, act_cloud)
+        # Ensure actions are within the valid range of action space
+        act_edge = torch.clamp(act_edge, 0, edge_num - 1)
+        act_cloud = torch.clamp(act_cloud, 0, cloud_num - 1)
+
+        # Combine actions into a single tensor
+        action = torch.stack([act_edge, act_cloud], dim=-1)
+        return Batch(
+            logits=(logits_edge, logits_cloud),
+            act=action,
+            state=(None, None),
+            dist=(dist_edge, dist_cloud)
+        )
+
 
 
 actor = Actor(is_gpu=is_gpu_default)
@@ -136,7 +193,7 @@ optim = torch.optim.Adam(actor_critic.parameters(), lr=lr)
 
 dist = torch.distributions.Categorical
 
-action_space = gym.spaces.MultiDiscrete([cloud_num, edge_num])
+action_space = gym.spaces.MultiDiscrete([edge_num, cloud_num])
 if lr_decay:
     lr_scheduler = LambdaLR(
         optim, lr_lambda=lambda epoch: lr_decay ** (epoch - 1)
@@ -144,14 +201,21 @@ if lr_decay:
 else:
     lr_scheduler = None
 
-policy = ts.policy.PPOPolicy(actor, critic, optim, dist_fn = dist,
-                             discount_factor=gamma, max_grad_norm=max_grad_norm,
-                             eps_clip=eps_clip, vf_coef=vf_coef,
-                             ent_coef=ent_coef, reward_normalization=rew_norm,
-                             advantage_normalization=norm_adv, recompute_advantage=recompute_adv,
-                             dual_clip=dual_clip, value_clip=value_clip,
-                             gae_lambda=gae_lambda, action_space=action_space,
-                             lr_scheduler=lr_scheduler)
+def custom_dist_fn(logits_edge, logits_cloud):
+    return (
+        dist(logits=logits_edge),
+        dist(logits=logits_cloud)
+    )
+
+policy = PPOPolicy(actor, critic, optim, custom_dist_fn,
+                   discount_factor=gamma, max_grad_norm=max_grad_norm,
+                   eps_clip=eps_clip, vf_coef=vf_coef,
+                   ent_coef=ent_coef, reward_normalization=rew_norm,
+                   advantage_normalization=norm_adv, recompute_advantage=recompute_adv,
+                   dual_clip=dual_clip, value_clip=value_clip,
+                   gae_lambda=gae_lambda, action_space=action_space,
+                   lr_scheduler=lr_scheduler,
+                  )
 
 for i in range(101):
     try:
@@ -167,18 +231,21 @@ for wi in range(100, 0 - 1, -2):
     else:
         epoch_a = epoch
 
+    # train_envs = DummyVectorEnv(
+    #     [lambda: MultiDiscreteToDiscrete(SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)) for _ in range(train_num)])
+    # test_envs = DummyVectorEnv(
+    #     [lambda: MultiDiscreteToDiscrete(SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)) for _ in range(test_num)])
     train_envs = DummyVectorEnv(
         [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(train_num)])
     test_envs = DummyVectorEnv(
         [lambda: SDN_Env(conf_name=config, w=wi / 100.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num) for _ in range(test_num)])
     buffer = ts.data.VectorReplayBuffer(buffer_size, train_num)
-
     train_collector = ts.data.Collector(
         policy=policy,
         env=train_envs,
         buffer=buffer,
     )
-
+    # print(train_collector.env.action_space)
     test_collector = ts.data.Collector(policy, test_envs)
     train_collector.collect(n_episode=train_num)
 

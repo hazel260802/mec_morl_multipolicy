@@ -140,7 +140,8 @@ def main():
     # Run UCB1 algorithm
     ucb_delays_avg, ucb_link_utilisations_avg = run_ucb1(env, observation_space, num_episodes=num_episodes)
 
-
+    print(np.sum(egreedy_delays_avg)/num_episodes, np.sum(softmax_delays_avg)/num_episodes, np.sum(ucb_delays_avg)/num_episodes, np.sum(ppo_delays_avg)/num_episodes)
+    print(np.sum(egreedy_link_utilisations_avg)/num_episodes, np.sum(softmax_link_utilisations_avg)/num_episodes, np.sum(ucb_link_utilisations_avg)/num_episodes, np.sum(ppo_link_utilisations_avg)/num_episodes)
     # Plotting the results
     plt.figure(figsize=(15, 7))
 

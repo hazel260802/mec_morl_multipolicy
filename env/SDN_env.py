@@ -78,7 +78,7 @@ class SDN_Env():
         # Calculate the total number of actions based on the number of edge and cloud servers
         self.edge_num = np.random.randint(self.edge_num_L, self.edge_num_H + 1) if not edge_num else edge_num
         self.cloud_num = np.random.randint(self.cloud_num_L, self.cloud_num_H + 1) if not cloud_num else cloud_num
-        self.action_space = spaces.Discrete(self.edge_num + self.cloud_num)
+        self.action_space = gym.spaces.MultiDiscrete([self.edge_num, self.cloud_num])
 
         # Tổng số máy chủ (bao gồm cả máy chủ cạnh và máy chủ đám mây)
         total_servers = self.edge_num + self.cloud_num
@@ -120,7 +120,7 @@ class SDN_Env():
         if self.cloud_n:
             self.cloud_num = self.cloud_n
         # Set the action space size based on the number of edge servers
-        self.action_space = spaces.Discrete(self.edge_num + self.cloud_num)
+        self.action_space = gym.spaces.MultiDiscrete([self.edge_num, self.cloud_num])
 
         # Initialize cloud_off_datarate and edge_off_datarate with random data rates
         self.cloud_off_datarate = np.random.uniform(10e6, 100e6, size=(self.cloud_num, self.user_num))
@@ -186,8 +186,7 @@ class SDN_Env():
         
         edge_action = None
         cloud_action = None
-        self.action = actions
-        # print('Actions:', actions)
+        self.actions = actions
         
         if self.arrive_flag:
             self.arrive_flag = False
@@ -202,15 +201,15 @@ class SDN_Env():
             the_task['off_link_utilisation'] = 0
             the_task['exe_link_utilisation'] = 0
             # Use the received action as a pair of edge and cloud
-            if isinstance(actions, tuple) and len(actions) == 2:
+            if isinstance(actions, np.ndarray) and actions.size == 2:
                 edge_action, cloud_action = actions
-            else: 
-                if 0 <= actions < self.edge_num :
-                    edge_action = actions
-                    # print(f"Edge action: {edge_action}")
-                if self.edge_num <= actions < self.edge_num + self.cloud_num:
-                    cloud_action = actions
-                    # print(f"Cloud action: {cloud_action}")
+            # else: 
+            #     if 0 <= actions < self.edge_num :
+            #         edge_action = actions
+            #         # print(f"Edge action: {edge_action}")
+            #     if self.edge_num <= actions < self.edge_num + self.cloud_num:
+            #         cloud_action = actions
+            #         # print(f"Cloud action: {cloud_action}")
 
             if (edge_action is not None) and (0 <= edge_action < self.edge_num):
                 # Edge action processing
@@ -226,10 +225,10 @@ class SDN_Env():
                 # Handle invalid action
                 self.invalid_act_flag = True
 
-            if (cloud_action is not None) and (self.edge_num <= cloud_action < self.edge_num + self.cloud_num):
+            if (cloud_action is not None) and (0 <= cloud_action < self.cloud_num):
                 # Cloud action processing
-                c = cloud_action - self.edge_num
-                the_task['to'] = c + 1
+                c = cloud_action
+                the_task['to'] = c 
                 off_link_utilisation = the_task['size']/ (
                         self.cloud_off_band_width[c] * self.dt)
                 the_task['off_link_utilisation'] = off_link_utilisation
@@ -402,11 +401,14 @@ class SDN_Env():
         # Reward calculation (Tính toán thưởng)
         reward = self.get_reward(finished_task)
 
-        # # Print the size of the action
-        # print(f"Size of Action: {actions}")
+        # Print the size of the action
+        print(f"Size of Action: {actions}")
 
-        # # Print the size of the reward
-        # print(f"Size of Reward: {reward}")
+        # Print the size of the reward
+        print(f"Size of Reward: {reward}")
+        
+        # # Print the size of the observation
+        # print(f"Size of Observation: {obs}")
         #####################################################
         # Additional information (Thông tin bổ sung)
         info = {}
@@ -443,7 +445,10 @@ class SDN_Env():
 
     def get_obs(self):
         obs = {}
-        servers = []
+        edge_servers = []
+        cloud_servers = []
+
+        # Process edge servers
         for ii in range(self.edge_num):
             edge = []
             edge.append(1.0)
@@ -462,8 +467,9 @@ class SDN_Env():
                     task_feature = 59
                 task_exe_hist[task_feature] += 1.0  # Ensure float data type
             edge = np.concatenate([np.array(edge, dtype=float), task_exe_hist], axis=0)
-            servers.append(edge)
-            
+            edge_servers.append(edge)
+
+        # Process cloud servers
         for ii in range(self.cloud_num):
             cloud = []
             cloud.append(1.0)
@@ -482,34 +488,35 @@ class SDN_Env():
                     task_feature = 59
                 task_exe_hist[task_feature] += 1.0  # Ensure float data type
             cloud = np.concatenate([np.array(cloud, dtype=float), task_exe_hist], axis=0)
-            servers.append(cloud)
+            cloud_servers.append(cloud)
 
-        # # Concatenate the combined servers array
-        # servers_combined = np.vstack(servers)
+        # Swap axes to get the shape (features, servers)
+        obs['edge_servers'] = np.array(edge_servers).swapaxes(0, 1)
+        obs['cloud_servers'] = np.array(cloud_servers).swapaxes(0, 1)
 
-        # # print(servers_combined)
-        # obs['servers'] = servers_combined.astype(np.float32)
-        obs['servers'] = np.array(servers).swapaxes(0,1)
-        
-        re = obs['servers']
-        # print(re)
-        return re
+        # Combine edge and cloud observations into a single state dictionary
+        observation = {'edge_servers': obs['edge_servers'], 'cloud_servers': obs['cloud_servers']}
 
+        return observation
 
     def estimate_rew(self):
         remain_list = []
-        if 0 <= self.action < self.edge_num:
+        edge_action = None
+        cloud_action = None
+        if isinstance(self.actions, np.ndarray) and len(self.actions) == 2:
+                edge_action, cloud_action = self.actions
+        if 0 <= edge_action < self.edge_num:
             # Chosen action is an edge server
-            for task in self.edge_exe_lists[self.action]:
+            for task in self.edge_exe_lists[edge_action]:
                 remain_list.append(task['remain'])
-            computing_speed = self.edge_cpu_freq[self.action] / self.edge_C
-            offload_time = self.task_size / self.edge_off_datarate[self.action][self.task_user_id] if self.task_size > 0 else 0
-        else:
+            computing_speed = self.edge_cpu_freq[edge_action] / self.edge_C
+            offload_time = self.task_size / self.edge_off_datarate[edge_action][self.task_user_id] if self.task_size > 0 else 0
+        if 0 <= cloud_action < self.cloud_num:
             # Chosen action is the cloud
-            for task in self.cloud_exe_lists[self.action - self.edge_num]:
+            for task in self.cloud_exe_lists[cloud_action]:
                 remain_list.append(task['remain'])
-            computing_speed = self.cloud_cpu_freq[self.action - self.edge_num] / self.cloud_C
-            offload_time = self.task_size / self.cloud_off_datarate[self.action - self.edge_num][self.task_user_id] if self.task_size > 0 else 0
+            computing_speed = self.cloud_cpu_freq[cloud_action] / self.cloud_C
+            offload_time = self.task_size / self.cloud_off_datarate[cloud_action][self.task_user_id] if self.task_size > 0 else 0
         # print(self.cloud_exe_lists, self.edge_exe_lists)
         remain_list = np.sort(remain_list)
 
@@ -583,8 +590,6 @@ class SDN_Env():
         total_task_size = 0
         total_link_utilisation = 0
         total_tasks = 0
-        average_delay_per_Mbits_task = 0
-        average_lu_per_Mbits_task = 0
 
         # Calculate total task delay and total task size
         for edge_exe_list in self.edge_exe_lists:
@@ -601,11 +606,7 @@ class SDN_Env():
                 total_task_size += task['size']
                 total_tasks += 1
 
-        # Calculate the average delay per Mbits task
-        if total_tasks > 0:
-            average_delay_per_Mbits_task = total_delay 
-            average_lu_per_Mbits_task  = total_link_utilisation 
-        else:
-            average_delay_per_Mbits_task = 0
-            average_lu_per_Mbits_task = 0    
-        return average_delay_per_Mbits_task, average_lu_per_Mbits_task
+        if total_tasks == 0: 
+            total_delay = 0
+            total_link_utilisation = 0    
+        return total_delay, total_link_utilisation
