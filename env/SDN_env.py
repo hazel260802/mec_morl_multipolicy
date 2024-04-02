@@ -78,11 +78,15 @@ class SDN_Env():
         # Calculate the total number of actions based on the number of edge and cloud servers
         self.edge_num = np.random.randint(self.edge_num_L, self.edge_num_H + 1) if not edge_num else edge_num
         self.cloud_num = np.random.randint(self.cloud_num_L, self.cloud_num_H + 1) if not cloud_num else cloud_num
-        self.action_space = gym.spaces.MultiDiscrete([self.edge_num, self.cloud_num])
+        
+        # Bounds are set based on the number of edge and cloud servers
+        low_bound = np.zeros(self.edge_num + self.cloud_num)
+        high_bound = np.ones(self.edge_num + self.cloud_num)
+        self.action_space = gym.spaces.Box(low=low_bound, high=high_bound, shape=(self.edge_num + self.cloud_num,))
 
         # Định nghĩa không gian quan sát
-        self.edge_observation_space = spaces.Box(low=0, high=1, shape=(self.edge_num,), dtype=np.float32)
-        self.cloud_observation_space = spaces.Box(low=0, high=1, shape=(self.cloud_num,), dtype=np.float32)
+        self.edge_observation_space = spaces.Box(low=0, high=1, shape=(self.edge_num,))
+        self.cloud_observation_space = spaces.Box(low=0, high=1, shape=(self.cloud_num,))
         # print(f"Action Space: {self.action_space}")
         # Initialize the environment
         self.reset()  
@@ -114,7 +118,7 @@ class SDN_Env():
         if self.cloud_n:
             self.cloud_num = self.cloud_n
         # Set the action space size based on the number of edge servers
-        self.action_space = gym.spaces.MultiDiscrete([self.edge_num, self.cloud_num])
+        self.action_space = gym.spaces.Box(low=0, high=1, shape=(self.edge_num + self.cloud_num,))
 
         # Initialize cloud_off_datarate and edge_off_datarate with random data rates
         self.cloud_off_datarate = np.random.uniform(10e6, 100e6, size=(self.cloud_num, self.user_num))
@@ -169,7 +173,7 @@ class SDN_Env():
 
         # Print the size of the state (ra)
         return self.get_obs()
-             
+          
     def step(self, actions):
         assert self.done == False, 'environment already output done'
         self.step_cnt += 1
@@ -178,10 +182,22 @@ class SDN_Env():
         self.step_link_utilisation = 0
         finished_task = []
         
-        edge_action = None
-        cloud_action = None
-        self.actions = actions
+        edge_action = -1
+        cloud_action = -1
+        # Case 1: Choose the edge server with the highest probability
+        if np.all(actions[:self.edge_num] == 1):
+            edge_action = np.argmax(actions[:self.edge_num])
+        # Case 2: Choose the cloud server with the highest probability
+        elif np.all(actions[self.edge_num:] == 1):
+            cloud_action = np.argmax(actions[self.edge_num:])
+        # Case 3: Choose both edge and cloud servers
+        else:
+            edge_action = np.argmax(actions[:self.edge_num])
+            cloud_action = np.argmax(actions[self.edge_num:])
         
+        self.edge_action = edge_action
+        self.cloud_action = cloud_action
+        print(actions, edge_action, cloud_action)
         if self.arrive_flag:
             self.arrive_flag = False
             the_task = {}
@@ -195,15 +211,15 @@ class SDN_Env():
             the_task['off_link_utilisation'] = 0
             the_task['exe_link_utilisation'] = 0
             # Use the received action as a pair of edge and cloud
-            if isinstance(actions, np.ndarray) and actions.size == 2:
-                edge_action, cloud_action = actions
+            # if isinstance(actions, np.ndarray) and actions.size == 2:
+            #     edge_action, cloud_action = actions
             # else: 
-            #     if 0 <= actions < self.edge_num :
-            #         edge_action = actions
-            #         # print(f"Edge action: {edge_action}")
-            #     if self.edge_num <= actions < self.edge_num + self.cloud_num:
-            #         cloud_action = actions
-            #         # print(f"Cloud action: {cloud_action}")
+            # if  :
+            #     edge_action = actions
+            #     # print(f"Edge action: {edge_action}")
+            # if self.edge_num <= actions < self.edge_num + self.cloud_num:
+            #     cloud_action = actions - self.edge_num
+            #     # print(f"Cloud action: {cloud_action}")
 
             if (edge_action is not None) and (0 <= edge_action < self.edge_num):
                 # Edge action processing
@@ -438,8 +454,7 @@ class SDN_Env():
 
     def get_obs(self):
         obs = {}
-        edge_servers = []
-        cloud_servers = []
+        servers = []
 
         # Process edge servers
         for ii in range(self.edge_num):
@@ -460,7 +475,7 @@ class SDN_Env():
                     task_feature = 59
                 task_exe_hist[task_feature] += 1.0  # Ensure float data type
             edge = np.concatenate([np.array(edge, dtype=float), task_exe_hist], axis=0)
-            edge_servers.append(edge)
+            servers.append(edge)
 
         # Process cloud servers
         for ii in range(self.cloud_num):
@@ -481,35 +496,35 @@ class SDN_Env():
                     task_feature = 59
                 task_exe_hist[task_feature] += 1.0  # Ensure float data type
             cloud = np.concatenate([np.array(cloud, dtype=float), task_exe_hist], axis=0)
-            cloud_servers.append(cloud)
+            servers.append(cloud)
 
         # Swap axes to get the shape (features, servers)
-        obs['edge_servers'] = np.array(edge_servers).swapaxes(0, 1)
-        obs['cloud_servers'] = np.array(cloud_servers).swapaxes(0, 1)
+        obs['servers'] = np.array(servers).swapaxes(0, 1)
 
         # Combine edge and cloud observations into a single state dictionary
-        observation = {'edge_servers': obs['edge_servers'], 'cloud_servers': obs['cloud_servers']}
-        # print(obs['edge_servers'].shape, obs['cloud_servers'].shape)
-        return observation
+        re = obs['servers']
+        return re
 
     def estimate_rew(self):
         remain_list = []
-        edge_action = None
-        cloud_action = None
-        if isinstance(self.actions, np.ndarray) and len(self.actions) == 2:
-                edge_action, cloud_action = self.actions
+        edge_action = self.edge_action
+        cloud_action = self.cloud_action
+        
         if 0 <= edge_action < self.edge_num:
             # Chosen action is an edge server
             for task in self.edge_exe_lists[edge_action]:
                 remain_list.append(task['remain'])
             computing_speed = self.edge_cpu_freq[edge_action] / self.edge_C
             offload_time = self.task_size / self.edge_off_datarate[edge_action][self.task_user_id] if self.task_size > 0 else 0
-        if 0 <= cloud_action < self.cloud_num:
+        elif 0 <= cloud_action < self.cloud_num:
             # Chosen action is the cloud
             for task in self.cloud_exe_lists[cloud_action]:
                 remain_list.append(task['remain'])
             computing_speed = self.cloud_cpu_freq[cloud_action] / self.cloud_C
             offload_time = self.task_size / self.cloud_off_datarate[cloud_action][self.task_user_id] if self.task_size > 0 else 0
+        else:
+            # Error handling for invalid action
+            raise ValueError("Invalid action chosen.")
         # print(self.cloud_exe_lists, self.edge_exe_lists)
         remain_list = np.sort(remain_list)
 

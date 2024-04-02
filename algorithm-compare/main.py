@@ -39,71 +39,54 @@ class sdn_net(nn.Module):
         self.mode = mode
 
         if self.mode == 'actor':
-            self.edge_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=edge_num * FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=edge_num, block_num=3)
-            self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=cloud_num * FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+                                    mlp_ch=MLP_CH, out_ch=edge_num+cloud_num, block_num=3)
         else:
-            self.edge_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
+            self.network = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
                                     mlp_ch=MLP_CH, out_ch=edge_num, block_num=3)
-            self.cloud_net = conv_mlp_net(conv_in=INPUT_CH, conv_ch=FEATURE_CH, mlp_in=(edge_num+cloud_num)*FEATURE_CH,\
-                                    mlp_ch=MLP_CH, out_ch=cloud_num, block_num=3)
-
+        
     def load_model(self, filename):
-        map_location = lambda storage, loc: storage
+        map_location=lambda storage, loc:storage
         self.load_state_dict(torch.load(filename, map_location=map_location))
         print('load model!')
-
+    
     def save_model(self, filename):
-        directory = os.path.dirname(filename)
-        os.makedirs(directory, exist_ok=True)
         torch.save(self.state_dict(), filename)
+        # print('save model!')
 
     def forward(self, obs, state=None, info={}):
-        
-        state = obs
+        state = obs#['servers']
         state = torch.tensor(state).float()
         if self.is_gpu:
             state = state.cuda()
-        # Chỉ trả về kết quả từ mạng tương ứng với chế độ
-        logits = None
-        if hasattr(self, 'edge_net') and self.edge_net is not None:
-            logits = self.edge_net(state)
-        # Kiểm tra xem self.cloud_net có được khởi tạo hay không
-        elif hasattr(self, 'cloud_net') and self.cloud_net is not None:
-            logits = self.cloud_net(state)
-        # print("State: ", state)
-        # print("Logits: ", logits)
-        return logits, state
 
+        logits = self.network(state)
+        
+        return logits, state
 
 class Actor(nn.Module):
     def __init__(self, is_gpu=is_gpu_default, dist_fn=None):
         super().__init__()
         self.is_gpu = is_gpu
-        self.edge_net = sdn_net(mode='actor')
-        self.cloud_net = sdn_net(mode='actor')
-        self.dist_fn = dist_fn  
+
+        self.net = sdn_net(mode='actor')
 
     def load_model(self, filename):
-        map_location = lambda storage, loc: storage
+        map_location=lambda storage, loc:storage
         self.load_state_dict(torch.load(filename, map_location=map_location))
         print('load model!')
-
+    
     def save_model(self, filename):
-        directory = os.path.dirname(filename)
-        os.makedirs(directory, exist_ok=True)
         torch.save(self.state_dict(), filename)
+        # print('save model!')
 
     def forward(self, obs, state=None, info={}):
-        logits_edge, _ = self.edge_net(obs['edge_servers'])
-        # print(logits_edge)
-        logits_edge = F.softmax(logits_edge, dim=-1)
+            
+        logits,_ = self.net(obs)
+        # Adjust output size according to the new action space
+        logits = F.sigmoid(logits)
 
-        logits_cloud, _ = self.cloud_net(obs['cloud_servers'])
-        logits_cloud = F.softmax(logits_cloud, dim=-1)
-        # print(logits_edge, logits_cloud)
-        return logits_edge, logits_cloud
+        return logits, state
 
 class Critic(nn.Module):
     def __init__(self, is_gpu=is_gpu_default):
@@ -112,24 +95,22 @@ class Critic(nn.Module):
 
         self.is_gpu = is_gpu
 
-        self.edge_net = sdn_net(mode='critic')
-        self.cloud_net = sdn_net(mode='critic')
+        self.net = sdn_net(mode='critic')
 
     def load_model(self, filename):
-        map_location = lambda storage, loc: storage
+        map_location=lambda storage, loc:storage
         self.load_state_dict(torch.load(filename, map_location=map_location))
         print('load model!')
-
+    
     def save_model(self, filename):
-        directory = os.path.dirname(filename)
-        os.makedirs(directory, exist_ok=True)
         torch.save(self.state_dict(), filename)
+        # print('save model!')
 
     def forward(self, obs, state=None, info={}):
-        v_edge, _ = self.edge_net(obs['edge_servers'])
-        v_cloud, _ = self.cloud_net(obs['cloud_servers'])
-        print(v_edge, v_cloud)
-        return v_edge, v_cloud
+            
+        v,_ = self.net(obs)
+
+        return v
 
 def main():
     # Initialize the SDN environment
@@ -137,9 +118,7 @@ def main():
     # Set hyperparameters
     num_episodes = 1000
     
-    obs = env.get_obs()
-    edge_observation_space = obs['edge_servers']
-    cloud_observation_space = obs['cloud_servers']
+    observation_space = env.get_obs()
     # Load PPO model for the last epoch
     actor = Actor(is_gpu=is_gpu_default)
     critic = Critic(is_gpu=is_gpu_default)
@@ -150,13 +129,13 @@ def main():
     ppo_delays_avg, ppo_link_utilisations_avg = run_ppo(env, num_episodes=num_episodes, actor=actor, critic=critic)
 
     # Run ε-Greedy algorithm
-    egreedy_delays_avg, egreedy_link_utilisations_avg = run_egreedy(env, edge_observation_space, cloud_observation_space, num_episodes=num_episodes)
+    egreedy_delays_avg, egreedy_link_utilisations_avg = run_egreedy(env, observation_space, num_episodes=num_episodes)
 
     # Run Softmax algorithm
-    softmax_delays_avg, softmax_link_utilisations_avg = run_softmax(env, edge_observation_space, cloud_observation_space, num_episodes=num_episodes)
+    softmax_delays_avg, softmax_link_utilisations_avg = run_softmax(env, observation_space, num_episodes=num_episodes)
 
     # Run UCB1 algorithm
-    ucb_delays_avg, ucb_link_utilisations_avg = run_ucb1(env, edge_observation_space, cloud_observation_space, num_episodes=num_episodes)
+    ucb_delays_avg, ucb_link_utilisations_avg = run_ucb1(env, observation_space, num_episodes=num_episodes)
 
     print(np.sum(egreedy_delays_avg)/num_episodes, np.sum(softmax_delays_avg)/num_episodes, np.sum(ucb_delays_avg)/num_episodes, np.sum(ppo_delays_avg)/num_episodes)
     print(np.sum(egreedy_link_utilisations_avg)/num_episodes, np.sum(softmax_link_utilisations_avg)/num_episodes, np.sum(ucb_link_utilisations_avg)/num_episodes, np.sum(ppo_link_utilisations_avg)/num_episodes)

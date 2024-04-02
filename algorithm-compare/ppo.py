@@ -1,4 +1,5 @@
 import torch
+
 def run_ppo(env, num_episodes=1000, actor=None, critic=None):
     if actor is None or critic is None:
         print("Error: Actor and Critic models must be provided.")
@@ -7,18 +8,16 @@ def run_ppo(env, num_episodes=1000, actor=None, critic=None):
     # Initialize lists to store delays and link utilizations
     delays = []
     link_utilisations = []
-    
+
     for episode in range(num_episodes):
         obs = env.reset()
         done = False
         while not done:
             # Choose actions using the actor model
-            logits_edge, logits_cloud = actor(obs)
-            edge_action = torch.argmax(logits_edge).item()
-            cloud_action = torch.argmax(logits_cloud).item()
-
+            action, _ = actor(torch.FloatTensor(obs))
+            # print(action.detach().numpy())
             # Perform actions and observe next state and reward
-            next_obs, reward, done, info = env.step([edge_action, cloud_action])
+            next_obs, _, done, _ = env.step(action.detach().numpy())
             # Update current observation
             obs = next_obs
 
