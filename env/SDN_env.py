@@ -84,9 +84,6 @@ class SDN_Env():
         high_bound = np.ones(self.edge_num + self.cloud_num)
         self.action_space = gym.spaces.Box(low=low_bound, high=high_bound, shape=(self.edge_num + self.cloud_num,))
 
-        # Định nghĩa không gian quan sát
-        self.edge_observation_space = spaces.Box(low=0, high=1, shape=(self.edge_num,))
-        self.cloud_observation_space = spaces.Box(low=0, high=1, shape=(self.cloud_num,))
         # print(f"Action Space: {self.action_space}")
         # Initialize the environment
         self.reset()  
@@ -184,6 +181,7 @@ class SDN_Env():
         
         edge_action = -1
         cloud_action = -1
+        task_size_dist = 1
         # Case 1: Choose the edge server with the highest probability
         if np.all(actions[:self.edge_num] == 1):
             edge_action = np.argmax(actions[:self.edge_num])
@@ -194,10 +192,11 @@ class SDN_Env():
         else:
             edge_action = np.argmax(actions[:self.edge_num])
             cloud_action = np.argmax(actions[self.edge_num:])
+            task_size_dist = actions[edge_action]
         
         self.edge_action = edge_action
         self.cloud_action = cloud_action
-        print(actions, edge_action, cloud_action)
+        # print(actions, edge_action, cloud_action)
         if self.arrive_flag:
             self.arrive_flag = False
             the_task = {}
@@ -210,44 +209,52 @@ class SDN_Env():
             the_task['exe_time'] = 0
             the_task['off_link_utilisation'] = 0
             the_task['exe_link_utilisation'] = 0
-            # Use the received action as a pair of edge and cloud
-            # if isinstance(actions, np.ndarray) and actions.size == 2:
-            #     edge_action, cloud_action = actions
-            # else: 
-            # if  :
-            #     edge_action = actions
-            #     # print(f"Edge action: {edge_action}")
-            # if self.edge_num <= actions < self.edge_num + self.cloud_num:
-            #     cloud_action = actions - self.edge_num
-            #     # print(f"Cloud action: {cloud_action}")
-
-            if (edge_action is not None) and (0 <= edge_action < self.edge_num):
+            
+            if (edge_action is not None) and (cloud_action is not None) and (0 <= edge_action < self.edge_num) and (0 <= cloud_action < self.cloud_num):
                 # Edge action processing
                 e = edge_action
                 the_task['to'] = e
-                off_link_utilisation = the_task['size']/ (
+                off_link_utilisation = the_task['size']*task_size_dist/ (
                         self.edge_off_band_width[e] * self.dt)
                 the_task['off_link_utilisation'] = off_link_utilisation
                 the_task['exe_link_utilisation'] = the_task['size']/ (self.LC[self.task_user_id, e] * self.dt)
                 self.step_link_utilisation = the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
                 self.edge_off_lists[e].append(the_task)
-            else:
-                # Handle invalid action
-                self.invalid_act_flag = True
-
-            if (cloud_action is not None) and (0 <= cloud_action < self.cloud_num):
+                # Calculate remaining task size after offloading to edge
+                remaining_task_size = the_task['size'] - task_size_dist*(self.LC[self.task_user_id, e] * self.dt) * the_task['exe_link_utilisation']
+                print(f"Remaining Task Size: {remaining_task_size}")
                 # Cloud action processing
                 c = cloud_action
                 the_task['to'] = c 
-                off_link_utilisation = the_task['size']/ (
-                        self.cloud_off_band_width[c] * self.dt)
+                off_link_utilisation = remaining_task_size / (self.cloud_off_band_width[c] * self.dt)
                 the_task['off_link_utilisation'] = off_link_utilisation
-                the_task['exe_link_utilisation'] = the_task['size'] / (self.LC[self.task_user_id, c] * self.dt)
-                self.step_link_utilisation = the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
+                the_task['exe_link_utilisation'] = remaining_task_size / (self.LC[self.task_user_id, c] * self.dt)
+                self.step_link_utilisation += the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
                 self.cloud_off_lists[c].append(the_task)
             else:
-                # Handle invalid action
-                self.invalid_act_flag = True
+                if (edge_action is not None) and (0 <= edge_action < self.edge_num):
+                    # Edge action processing
+                    e = edge_action
+                    the_task['to'] = e
+                    off_link_utilisation = the_task['size']/ (
+                            self.edge_off_band_width[e] * self.dt)
+                    the_task['off_link_utilisation'] = off_link_utilisation
+                    the_task['exe_link_utilisation'] = the_task['size']/ (self.LC[self.task_user_id, e] * self.dt)
+                    self.step_link_utilisation = the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
+                    self.edge_off_lists[e].append(the_task)
+                if (cloud_action is not None) and (0 <= cloud_action < self.cloud_num):
+                    # Cloud action processing
+                    c = cloud_action
+                    the_task['to'] = c 
+                    off_link_utilisation = the_task['size']/ (
+                            self.cloud_off_band_width[c] * self.dt)
+                    the_task['off_link_utilisation'] = off_link_utilisation
+                    the_task['exe_link_utilisation'] = the_task['size'] / (self.LC[self.task_user_id, c] * self.dt)
+                    self.step_link_utilisation = the_task['off_link_utilisation'] + the_task['exe_link_utilisation']
+                    self.cloud_off_lists[c].append(the_task)
+                else:
+                    # Handle invalid action
+                    self.invalid_act_flag = True
 
         self.rew_t, self.rew_lu = self.estimate_rew()
         
