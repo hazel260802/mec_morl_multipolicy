@@ -116,7 +116,7 @@ def main():
     # Initialize the SDN environment
     env = SDN_Env(conf_file='../env/config1.json', conf_name=config, w=1.0, fc=4e9, fe=2e9, edge_num=edge_num, cloud_num=cloud_num)
     # Set hyperparameters
-    num_episodes = 1000
+    num_episodes = 100
     
     observation_space = env.get_obs()
     # Load PPO model for the last epoch
